@@ -1,0 +1,137 @@
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isRole(role) {
+      return isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == role;
+    }
+
+    function isStudent() {
+      return isRole('student');
+    }
+    
+    function isAdmin() {
+      return isRole('admin');
+    }
+
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    
+    function getStudentIdForUser(userId) {
+        return get(/databases/$(database)/documents/users/$(userId)).data.studentDocId;
+    }
+    
+    // USERS: Can read their own user document. Admins can read any.
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow update: if isOwner(userId) || isAdmin();
+      allow create: if isSignedIn();
+    }
+    
+    // STUDENTS: Students can read their own profile. Admins/Teachers can read all.
+    match /students/{studentId} {
+        allow read: if isSignedIn() && (getStudentIdForUser(request.auth.uid) == studentId || isAdmin() || isRole('teacher'));
+        allow update: if isAdmin();
+        allow create: if isAdmin();
+        allow delete: if isAdmin();
+    }
+
+    // TEACHERS & ADMINS (Staff collections)
+    match /teachers/{teacherId} {
+      allow read: if isSignedIn();
+      allow update, create, delete: if isAdmin();
+    }
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow update, create, delete: if isAdmin();
+    }
+    
+    // FEES: Students can read their own fee record. Admins can read/write all.
+    match /fees/{studentId} {
+       allow read, update: if isSignedIn() && (getStudentIdForUser(request.auth.uid) == studentId || isAdmin());
+       allow create: if isAdmin();
+    }
+
+    // NOTIFICATIONS: Users can read/update their own notifications.
+    match /notifications/{notificationId} {
+      allow read, update, delete: if isSignedIn() && resource.data.recipientUid == request.auth.uid;
+      allow create: if isSignedIn(); // Server actions create these
+    }
+    
+    // COURSES, CLASSES: Any signed-in user can read courses and classes. Only admins can modify.
+    match /courses/{courseId} {
+        allow read: if isSignedIn();
+        allow create, update, delete: if isAdmin();
+    }
+    
+    match /classes/{classId} {
+        allow read: if isSignedIn();
+        allow create, update, delete: if isAdmin();
+    }
+    
+    // ATTENDANCE: Read-only for students, full access for admins.
+    match /attendance/{attendanceId} {
+        allow read: if isSignedIn();
+        allow create, update, delete: if isAdmin() || isRole('teacher');
+    }
+
+    // MATERIALS: Any signed-in user can read materials.
+    match /materials/{materialId} {
+        allow read: if isSignedIn();
+        allow create, update, delete: if isAdmin() || isRole('teacher');
+    }
+
+    // MARKS: Students can read their own marks. Admins/Teachers can manage.
+    match /marks/{markId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin() || isRole('teacher');
+    }
+
+    // PLACEMENTS: Any signed-in user can read. Admins can manage.
+    match /placements/{placementId} {
+        allow read: if isSignedIn();
+        allow create, update, delete: if isAdmin();
+    }
+    match /applications/{applicationId} {
+        allow read: if isSignedIn();
+        allow create: if isStudent();
+        allow update, delete: if isAdmin();
+    }
+    
+    // HOSTELS: Any signed-in user can read. Admins can manage.
+    match /hostels/{hostelId} {
+        allow read: if isSignedIn();
+        allow create, update, delete: if isAdmin();
+    }
+    match /complaints/{complaintId} {
+        allow read: if isSignedIn();
+        allow create: if isStudent();
+        allow update, delete: if isAdmin();
+    }
+
+    // COUNTERS: Only accessible by server/admin.
+    match /counters/{counterId} {
+        allow read, write: if isAdmin();
+    }
+    
+    // BACKLOGS: Only accessible by server/admin for now.
+    match /backlogs/{backlogId} {
+        allow read: if isSignedIn();
+        allow write: if isAdmin();
+    }
+
+    // LOGIN ACTIVITIES: Write-only by server actions.
+    match /loginActivities/{activityId} {
+        allow read: if isAdmin();
+        allow write: if isSignedIn();
+    }
+  }
+}

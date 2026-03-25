@@ -1,0 +1,212 @@
+[
+  {
+    "program": "B.Tech",
+    "branch": "CSE",
+    "semester": 1,
+    "section": "A",
+    "day": "Monday",
+    "period": 1,
+    "courseId": "BTE1CSE001",
+    "teacherId": "efd1f4b6-eda3-42f2-a595-c6a80d000d4d"
+  },
+  {
+    "program": "B.Tech",
+    "branch": "CSE",
+    "semester": 1,
+    "section": "A",
+    "day": "Monday",
+    "period": 3,
+    "courseId": "BTE1CSE002",
+    "teacherId": "4785c302-6e5b-4830-a5d2-024e888c6135"
+  },
+  {
+    "program": "B.Tech",
+    "branch": "CSE",
+    "semester": 1,
+    "section": "A",
+    "day": "Monday",
+    "period": 4,
+    "courseId": "BTE1CSE003",
+    "teacherId": "39aa2ec7-9e76-4244-aeeb-c380a05889b4"
+  },
+  {
+    "program": "B.Tech",
+    "branch": "CSE",
+    "semester": 1,
+    "section": "A",
+    "day": "Monday",
+    "period": 5,
+    "courseId": "BTE1CSE004",
+    "teacherId": "efd1f4b6-eda3-42f2-a595-c6a80d000d4d"
+  },
+  {
+    "program": "B.Tech",
+    "branch": "CSE",
+    "semester": 1,
+    "section": "A",
+    "day": "Tuesday",
+    "period": 2,
+    "courseId": "BTE1CSE002",
+    "teacherId": "4785c302-6e5b-4830-a5d2-024e888c6135"
+  },
+  {
+    "program": "B.Tech",
+    "branch": "CSE",
+    "semester": 1,
+    "section": "A",
+    "day": "Tuesday",
+    "period": 3,
+    "courseId": "BTE1CSE001",
+    "teacherId": "efd1f4b6-eda3-42f2-a595-c6a80d000d4d"
+  },
+  {
+    "program": "B.Tech",
+    "branch": "CSE",
+    "semester": 1,
+    "section": "A",
+    "day": "Tuesday",
+    "period": 4,
+    "courseId": "BTE1CSE004",
+    "teacherId": "efd1f4b6-eda3-42f2-a595-c6a80d000d4d"
+  },
+  {
+    "program": "B.Tech",
+    "branch": "CSE",
+    "semester": 1,
+    "section": "A",
+    "day": "Tuesday",
+    "period": 6,
+    "courseId": "BTE1CSE003",
+    "teacherId": "39aa2ec7-9e76-4244-aeeb-c380a05889b4"
+  },
+  {
+    "program": "B.Tech",
+    "branch": "CSE",
+    "semester": 1,
+    "section": "A",
+    "day": "Wednesday",
+    "period": 1,
+    "courseId": "BTE1CSE003",
+    "teacherId": "39aa2ec7-9e76-4244-aeeb-c380a05889b4"
+  },
+  {
+    "program": "B.Tech",
+    "branch": "CSE",
+    "semester": 1,
+    "section": "A",
+    "day": "Wednesday",
+    "period": 4,
+    "courseId": "BTE1CSE001",
+    "teacherId": "efd1f4b6-eda3-42f2-a595-c6a80d000d4d"
+  },
+  {
+    "program": "B.Tech",
+    "branch": "CSE",
+    "semester": 1,
+    "section": "A",
+    "day": "Wednesday",
+    "period": 5,
+    "courseId": "BTE1CSE004",
+    "teacherId": "efd1f4b6-eda3-42f2-a595-c6a80d000d4d"
+  },
+  {
+    "program": "B.Tech",
+    "branch": "CSE",
+    "semester": 1,
+    "section": "A",
+    "day": "Thursday",
+    "period": 1,
+    "courseId": "BTE1CSE001",
+    "teacherId": "efd1f4b6-eda3-42f2-a595-c6a80d000d4d"
+  },
+  {
+    "program": "B.Tech",
+    "branch": "CSE",
+    "semester": 1,
+    "section": "A",
+    "day": "Thursday",
+    "period": 2,
+    "courseId": "BTE1CSE002",
+    "teacherId": "4785c302-6e5b-4830-a5d2-024e888c6135"
+  },
+  {
+    "program": "B.Tech",
+    "branch": "CSE",
+    "semester": 1,
+    "section": "A",
+    "day": "Friday",
+    "period": 4,
+    "courseId": "BTE1CSE001",
+    "teacherId": "efd1f4b6-eda3-42f2-a595-c6a80d000d4d"
+  },
+  {
+    "program": "B.Tech",
+    "branch": "CSE",
+    "semester": 1,
+    "section": "A",
+    "day": "Thursday",
+    "period": 5,
+    "courseId": "BTE1CSE003",
+    "teacherId": "39aa2ec7-9e76-4244-aeeb-c380a05889b4"
+  },
+  {
+    "program": "B.Tech",
+    "branch": "CSE",
+    "semester": 1,
+    "section": "A",
+    "day": "Friday",
+    "period": 2,
+    "courseId": "BTE1CSE002",
+    "teacherId": "4785c302-6e5b-4830-a5d2-024e888c6135"
+  },
+  {
+    "program": "B.Tech",
+    "branch": "CSE",
+    "semester": 1,
+    "section": "A",
+    "day": "Friday",
+    "period": 5,
+    "courseId": "BTE1CSE003",
+    "teacherId": "39aa2ec7-9e76-4244-aeeb-c380a05889b4"
+  },
+  {
+    "program": "B.Tech",
+    "branch": "CSE",
+    "semester": 1,
+    "section": "A",
+    "day": "Saturday",
+    "period": 2,
+    "courseId": "BTE1CSE004",
+    "teacherId": "efd1f4b6-eda3-42f2-a595-c6a80d000d4d"
+  },
+  {
+    "program": "B.Tech",
+    "branch": "CSE",
+    "semester": 1,
+    "section": "A",
+    "day": "Saturday",
+    "period": 3,
+    "courseId": "BTE1CSE002",
+    "teacherId": "4785c302-6e5b-4830-a5d2-024e888c6135"
+  },
+  {
+    "program": "B.Tech",
+    "branch": "CSE",
+    "semester": 1,
+    "section": "A",
+    "day": "Saturday",
+    "period": 4,
+    "courseId": "BTE1CSE001",
+    "teacherId": "efd1f4b6-eda3-42f2-a595-c6a80d000d4d"
+  },
+  {
+    "program": "B.Tech",
+    "branch": "CSE",
+    "semester": 1,
+    "section": "A",
+    "day": "Saturday",
+    "period": 5,
+    "courseId": "BTE1CSE003",
+    "teacherId": "39aa2ec7-9e76-4244-aeeb-c380a05889b4"
+  }
+]

@@ -1,0 +1,33 @@
+[
+  {
+    "id": "admin_seed_001",
+    "uid": "admin_seed_001",
+    "name": "SSN Admin",
+    "email": "admin@college.edu",
+    "passwordHash": "$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi",
+    "role": "admin",
+    "staffId": "ADM24GA0001",
+    "staffDocId": "admin_seed_001",
+    "studentDocId": null,
+    "collegeId": null,
+    "initials": "SA",
+    "avatarUrl": "https://placehold.co/100x100.png?text=SA",
+    "createdAt": "2024-01-01T00:00:00.000Z",
+    "updatedAt": "2024-01-01T00:00:00.000Z",
+    "settings": {
+      "notifications": {
+        "enabled": true
+      }
+    }
+  },
+  {
+    "id": "admin-mmanjgif",
+    "uid": "admin-mmanjgif",
+    "email": "admin@ssn.edu.in",
+    "role": "admin",
+    "name": "System Administrator",
+    "passwordHash": "$2b$10$vBLIsrLbqbJwM6RByT/8quFkJkBmcvIrzNl.khODVedPTB.y7ZLya",
+    "createdAt": "2026-03-03T13:37:02.295Z",
+    "updatedAt": "2026-03-03T13:37:02.295Z"
+  }
+]

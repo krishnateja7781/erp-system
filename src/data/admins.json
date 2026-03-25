@@ -1,0 +1,37 @@
+[
+  {
+    "id": "admin_seed_001",
+    "user_uid": "admin_seed_001",
+    "staffId": "ADM24GA0001",
+    "name": "SSN Admin",
+    "email": "admin@college.edu",
+    "department": "General Administration",
+    "position": "Super Admin",
+    "designation": "Super Admin",
+    "status": "Active",
+    "avatarUrl": "https://placehold.co/100x100.png?text=SA",
+    "initials": "SA",
+    "phone": null,
+    "officeLocation": "Main Office",
+    "qualifications": "N/A",
+    "specialization": "N/A",
+    "dob": "N/A",
+    "joinDate": "2024-01-01T00:00:00.000Z",
+    "createdAt": "2024-01-01T00:00:00.000Z",
+    "updatedAt": "2024-01-01T00:00:00.000Z",
+    "program": "General Administration"
+  },
+  {
+    "id": "admin-mmanjgif",
+    "uid": "admin-mmanjgif",
+    "user_uid": "admin-mmanjgif",
+    "email": "admin@ssn.edu.in",
+    "name": "System Administrator",
+    "staffId": "ADM001",
+    "department": "Administration",
+    "designation": "System Administrator",
+    "passwordHash": "$2b$10$vBLIsrLbqbJwM6RByT/8quFkJkBmcvIrzNl.khODVedPTB.y7ZLya",
+    "createdAt": "2026-03-03T13:37:02.295Z",
+    "updatedAt": "2026-03-03T13:37:02.295Z"
+  }
+]

@@ -1,0 +1,203 @@
+﻿[93m[4mUnused files[24m[39m (42)
+erp-backend/server.js                                        
+public/firebase-messaging-sw.js                              
+scripts/check-attendance-schema.js                           
+scripts/check-exams-schema.js                                
+scripts/import-data.ts                                       
+scripts/inspect_attendance_schema.js                         
+scripts/run-migration-003.mjs                                
+tmp/run_migration.js                                         
+tmp/test-action.ts                                           
+tmp/test-student-insert.js                                   
+src/actions/employee-actions.ts                              
+src/actions/google-classroom-actions.ts                      
+src/lib/email.ts                                             
+erp-backend/src/config/db.js                                 
+erp-backend/src/config/google.js                             
+erp-backend/src/controllers/announcementController.js        
+erp-backend/src/controllers/assignmentController.js          
+erp-backend/src/controllers/authController.js                
+erp-backend/src/controllers/classroomController.js           
+erp-backend/src/controllers/driveController.js               
+erp-backend/src/controllers/formController.js                
+erp-backend/src/controllers/submissionController.js          
+erp-backend/src/middlewares/auth.js                          
+erp-backend/src/middlewares/errorHandler.js                  
+erp-backend/src/middlewares/googleAuth.js                    
+erp-backend/src/middlewares/upload.js                        
+erp-backend/src/models/Classroom.js                          
+erp-backend/src/models/Enrollment.js                         
+erp-backend/src/models/User.js                               
+erp-backend/src/routes/announcementRoutes.js                 
+erp-backend/src/routes/assignmentRoutes.js                   
+erp-backend/src/routes/authRoutes.js                         
+erp-backend/src/routes/classroomRoutes.js                    
+erp-backend/src/routes/driveRoutes.js                        
+erp-backend/src/routes/formRoutes.js                         
+erp-backend/src/routes/submissionRoutes.js                   
+src/components/ui/toggle-group.tsx                           
+src/components/shared/google-classroom/announcements-tab.tsx 
+src/components/shared/google-classroom/assignments-tab.tsx   
+src/components/shared/google-classroom/google-auth-button.tsx
+src/components/shared/google-classroom/index.ts              
+src/components/shared/google-classroom/submissions-view.tsx  
+[93m[4mUnused dependencies[24m[39m (3)
+@radix-ui/react-toggle-group  package.json:35:6
+date-fns                      package.json:42:6
+nodemailer                    package.json:51:6
+[93m[4mUnused devDependencies[24m[39m (2)
+@types/bcryptjs    package.json:61:6
+@types/nodemailer  package.json:63:6
+[93m[4mUnlisted dependencies[24m[39m (1)
+postcss-load-config  postcss.config.mjs:1:10
+[93m[4mUnused exports[24m[39m (110)
+signInAction                 function  src/actions/auth-actions.ts:8:23         
+resetPassword                function  src/actions/auth-actions.ts:62:23        
+getProfile                   function  src/actions/auth-actions.ts:77:23        
+DialogPortal                           src/components/ui/dialog.tsx:113:3       
+DialogOverlay                          src/components/ui/dialog.tsx:114:3       
+AlertDialogPortal                      src/components/ui/alert-dialog.tsx:131:3 
+AlertDialogOverlay                     src/components/ui/alert-dialog.tsx:132:3 
+DropdownMenuCheckboxItem               src/components/ui/dropdown-menu.tsx:190:3
+DropdownMenuRadioItem                  src/components/ui/dropdown-menu.tsx:191:3
+DropdownMenuLabel                      src/components/ui/dropdown-menu.tsx:192:3
+DropdownMenuShortcut                   src/components/ui/dropdown-menu.tsx:194:3
+DropdownMenuGroup                      src/components/ui/dropdown-menu.tsx:195:3
+DropdownMenuPortal                     src/components/ui/dropdown-menu.tsx:196:3
+DropdownMenuSub                        src/components/ui/dropdown-menu.tsx:197:3
+DropdownMenuSubContent                 src/components/ui/dropdown-menu.tsx:198:3
+DropdownMenuSubTrigger                 src/components/ui/dropdown-menu.tsx:199:3
+DropdownMenuRadioGroup                 src/components/ui/dropdown-menu.tsx:200:3
+reducer                                src/hooks/use-toast.ts:78:14             
+linkGoogleCourseId           function  src/actions/classroom-actions.ts:70:23   
+SECTION_STRENGTH                       src/lib/utils.ts:10:14                   
+getDepartmentCode                      src/lib/utils.ts:98:14                   
+generateUSN                  function  src/lib/utils.ts:137:17                  
+updateBook                   function  src/actions/library-actions.ts:49:23     
+badgeVariants                          src/components/ui/badge.tsx:36:17        
+createNotification           function  src/actions/notification-actions.ts:4:23 
+getUserProfileOnLogin        function  src/actions/user-actions.ts:14:23        
+TableFooter                            src/components/ui/table.tsx:113:3        
+TableCaption                           src/components/ui/table.tsx:117:3        
+SelectGroup                            src/components/ui/select.tsx:152:3       
+SelectLabel                            src/components/ui/select.tsx:156:3       
+SelectSeparator                        src/components/ui/select.tsx:158:3       
+SelectScrollUpButton                   src/components/ui/select.tsx:159:3       
+SelectScrollDownButton                 src/components/ui/select.tsx:160:3       
+getStudentAttendanceRecords  function  src/actions/attendance-actions.ts:37:23  
+useFormField                           src/components/ui/form.tsx:170:3         
+saveAllMarksForClass         function  src/actions/marks-actions.ts:75:23       
+getStudent                   function  src/actions/student-actions.ts:99:23     
+getAllStudents               function  src/actions/student-actions.ts:136:23    
+generateCollegeId            function  src/actions/student-actions.ts:189:23    
+ChartLegend                            src/components/ui/chart.tsx:390:3        
+ChartLegendContent                     src/components/ui/chart.tsx:391:3        
+ChartStyle                             src/components/ui/chart.tsx:392:3        
+AreaChart                              src/components/ui/chart.tsx:393:3        
+BarChart                               src/components/ui/chart.tsx:394:3        
+LineChart                              src/components/ui/chart.tsx:395:3        
+PieChart                               src/components/ui/chart.tsx:396:3        
+RadarChart                             src/components/ui/chart.tsx:397:3        
+RadialBarChart                         src/components/ui/chart.tsx:398:3        
+ScatterChart                           src/components/ui/chart.tsx:399:3        
+Area                                   src/components/ui/chart.tsx:400:3        
+Bar                                    src/components/ui/chart.tsx:401:3        
+Line                                   src/components/ui/chart.tsx:402:3        
+Pie                                    src/components/ui/chart.tsx:403:3        
+Radar                                  src/components/ui/chart.tsx:404:3        
+RadialBar                              src/components/ui/chart.tsx:405:3        
+Scatter                                src/components/ui/chart.tsx:406:3        
+CartesianGrid                          src/components/ui/chart.tsx:407:3        
+Cell                                   src/components/ui/chart.tsx:408:3        
+Label                                  src/components/ui/chart.tsx:409:3        
+LabelList                              src/components/ui/chart.tsx:410:3        
+Legend                                 src/components/ui/chart.tsx:411:3        
+PolarAngleAxis                         src/components/ui/chart.tsx:412:3        
+PolarGrid                              src/components/ui/chart.tsx:413:3        
+PolarRadiusAxis                        src/components/ui/chart.tsx:414:3        
+ResponsiveContainer                    src/components/ui/chart.tsx:415:3        
+ReferenceLine                          src/components/ui/chart.tsx:416:3        
+Tooltip                                src/components/ui/chart.tsx:417:3        
+XAxis                                  src/components/ui/chart.tsx:418:3        
+YAxis                                  src/components/ui/chart.tsx:419:3        
+getServerSession             function  src/lib/auth-session.ts:40:23            
+hashPassword                 function  src/lib/auth-session.ts:55:23            
+verifyPassword               function  src/lib/auth-session.ts:59:23            
+createClient                 function  src/lib/supabase.ts:5:17                 
+ToastAction                            src/components/ui/toast.tsx:128:3        
+SidebarGroup                           src/components/ui/sidebar.tsx:744:3      
+SidebarGroupAction                     src/components/ui/sidebar.tsx:745:3      
+SidebarGroupContent                    src/components/ui/sidebar.tsx:746:3      
+SidebarGroupLabel                      src/components/ui/sidebar.tsx:747:3      
+SidebarInput                           src/components/ui/sidebar.tsx:749:3      
+SidebarMenuAction                      src/components/ui/sidebar.tsx:752:3      
+SidebarMenuBadge                       src/components/ui/sidebar.tsx:753:3      
+SidebarMenuSkeleton                    src/components/ui/sidebar.tsx:756:3      
+SidebarMenuSub                         src/components/ui/sidebar.tsx:757:3      
+SidebarMenuSubButton                   src/components/ui/sidebar.tsx:758:3      
+SidebarMenuSubItem                     src/components/ui/sidebar.tsx:759:3      
+SidebarRail                            src/components/ui/sidebar.tsx:761:3      
+SidebarSeparator                       src/components/ui/sidebar.tsx:762:3      
+useSidebar                             src/components/ui/sidebar.tsx:764:3      
+deleteManyWhere              function  src/lib/db.ts:134:23                     
+getNextCounter               function  src/lib/db.ts:149:23                     
+ScrollBar                              src/components/ui/scroll-area.tsx:48:22  
+createGoogleClassroom        function  src/lib/google-classroom-api.ts:131:23   
+joinGoogleClassroom          function  src/lib/google-classroom-api.ts:138:23   
+listGoogleClassrooms         function  src/lib/google-classroom-api.ts:145:23   
+getGoogleClassroom           function  src/lib/google-classroom-api.ts:149:23   
+createAnnouncement           function  src/lib/google-classroom-api.ts:165:23   
+listAnnouncements            function  src/lib/google-classroom-api.ts:175:23   
+createAssignment             function  src/lib/google-classroom-api.ts:208:23   
+listAssignments              function  src/lib/google-classroom-api.ts:218:23   
+submitAssignment             function  src/lib/google-classroom-api.ts:247:23   
+listSubmissions              function  src/lib/google-classroom-api.ts:261:23   
+uploadFileToDrive            function  src/lib/google-classroom-api.ts:277:23   
+getDriveFileInfo             function  src/lib/google-classroom-api.ts:290:23   
+SheetPortal                            src/components/ui/sheet.tsx:131:3        
+SheetOverlay                           src/components/ui/sheet.tsx:132:3        
+SheetTrigger                           src/components/ui/sheet.tsx:133:3        
+SheetClose                             src/components/ui/sheet.tsx:134:3        
+SheetHeader                            src/components/ui/sheet.tsx:136:3        
+SheetFooter                            src/components/ui/sheet.tsx:137:3        
+SheetDescription                       src/components/ui/sheet.tsx:139:3        
+[93m[4mUnused exported types[24m[39m (38)
+ButtonProps              interface  src/components/ui/button.tsx:37:18                        
+InputProps               interface  src/components/ui/input.tsx:5:18                          
+Employee                 interface  src/lib/types.ts:139:18                                   
+Course                   interface  src/lib/types.ts:148:18                                   
+Timetable                interface  src/lib/types.ts:169:18                                   
+Attendance               interface  src/lib/types.ts:178:18                                   
+Mark                     interface  src/lib/types.ts:189:18                                   
+Fee                      interface  src/lib/types.ts:203:18                                   
+Transaction              interface  src/lib/types.ts:217:18                                   
+HallTicketRule           interface  src/lib/types.ts:257:18                                   
+PromotionLog             interface  src/lib/types.ts:266:18                                   
+SnapshotData             interface  src/lib/types.ts:278:18                                   
+SemesterSnapshot         interface  src/lib/types.ts:283:18                                   
+HostelRoom               interface  src/lib/types.ts:296:18                                   
+HostelAllocation         interface  src/lib/types.ts:307:18                                   
+PlacementApplication     interface  src/lib/types.ts:354:18                                   
+Resume                   interface  src/lib/types.ts:398:18                                   
+Notification             interface  src/lib/types.ts:406:18                                   
+BadgeProps               interface  src/components/ui/badge.tsx:26:18                         
+AdminSignupFormValues    type       src/components/auth/admin-signup-form.tsx:38:13           
+SignupFormValues         type       src/components/auth/signup-form.tsx:42:13                 
+StudentAttendanceRow     interface  src/actions/attendance-actions.ts:6:18                    
+SaveAttendancePayload    interface  src/actions/attendance-actions.ts:129:18                  
+TextareaProps            interface  src/components/ui/textarea.tsx:8:18                       
+AddStaffDialogProps      interface  src/components/admin/staff/add-staff-dialog.tsx:79:18     
+AddStudentFormValues     type       src/components/admin/students/add-student-dialog.tsx:63:13
+ScheduleEntry            type       src/components/shared/TimetableGrid.tsx:15:15             
+CourseOption             type       src/components/shared/TimetableGrid.tsx:15:30             
+InvoiceData              type       src/ai/flows/email-flow.ts:24:13                          
+StudentResumeData        interface  src/components/student/resume-display.tsx:18:18           
+ChatRequest              interface  src/chatbots/types.ts:7:18                                
+GoogleCourse             interface  src/lib/google-classroom-api.ts:113:18                    
+CreateClassroomPayload   interface  src/lib/google-classroom-api.ts:124:18                    
+GoogleAnnouncement       interface  src/lib/google-classroom-api.ts:155:18                    
+GoogleAssignment         interface  src/lib/google-classroom-api.ts:183:18                    
+CreateAssignmentPayload  interface  src/lib/google-classroom-api.ts:199:18                    
+GoogleSubmission         interface  src/lib/google-classroom-api.ts:226:18                    
+DriveFile                interface  src/lib/google-classroom-api.ts:269:18                    
+[33m[4mConfiguration hints[24m (1)[39m

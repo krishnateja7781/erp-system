@@ -3,6 +3,7 @@
 
 # Dependencies
 /node_modules
+/erp-mobile/node_modules
 /.pnp
 .pnp.js
 

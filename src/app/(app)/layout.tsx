@@ -1,6 +1,7 @@
-// This layout can be used for common elements or context providers
-// specific to the authenticated parts of the application.
-// For now, it just renders the children.
+// Route Segment Config: Force all pages under (app) to be dynamically rendered.
+// This prevents Next.js from attempting to prerender pages that require
+// runtime secrets (Supabase keys) during `npm run build`.
+export const dynamic = 'force-dynamic';
 
 export default function AppAreaLayout({
   children,

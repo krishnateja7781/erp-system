@@ -1,5 +1,12 @@
 {
     "IDX.aI.enableInlineCompletion": true,
     "IDX.aI.enableCodebaseIndexing": true,
-    "redHatDependencyAnalytics.vulnerabilityAlertSeverity": "Warning"
+    "redHatDependencyAnalytics.vulnerabilityAlertSeverity": "Warning",
+    "css.validate": false,
+    "scss.validate": false,
+    "less.validate": false,
+    "css.customData": [],
+    "files.associations": {
+        "*.css": "tailwindcss"
+    }
 }

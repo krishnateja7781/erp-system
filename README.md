@@ -467,8 +467,43 @@ npm run seed:fees
 | `npm run genkit:dev` | Start Google Genkit AI development server |
 | `npm run genkit:watch` | Start Genkit dev server with hot-reload |
 
----
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+SUPER ADMIN LOGIN DETAILS : 
+
+  email id : superadmin1@gmail.com
+  password : SUP0101
+
+STUDENT LOGIN DETAILS : 
+
+  email id : student1@gmail.com
+  password : STU0101
+
+TEACHER LOGIN DETAILS : 
+
+  email id : teacher1@gmail.com
+  password : TEA0101
+
+EMPLOYEE LOGIN DETAILS  :
+
+  HOSTEL MANAGEMENT EMPLOYEE :
+
+    email id : hostel@gmail.com
+    password : HOS0101
+
+ 
+  STAFF MANAGEMENT EMPLOYEE :
+
+    email id : staff@gmail.com
+    password : STA0101
+
+
+  EXAMS,MARKS AND TIMETABLES MANAGEMENT : 
+
+    email id : exam@gmail.com
+    password : EXA0101
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 ## License
 
 This project is proprietary software developed for academic institutional use. All rights reserved.

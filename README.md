@@ -29,7 +29,8 @@ AI integration, and a 24-table PostgreSQL schema — all in a single serverless 
 - **Unauthorized Route** — Dedicated `/unauthorized` page for unknown or missing roles avoids silent failures.
 - **Environment Isolation** — `SUPABASE_SERVICE_ROLE_KEY`, `ERP_BACKEND_JWT_SECRET`, and `SMTP_PASS` carry no `NEXT_PUBLIC_` prefix and are never bundled into the client runtime.
 
-### Super Admin Portal
+### Super Admin Portal :
+
 - **Institutional Dashboard** — Aggregated metrics and activity summary across the entire institution.
 - **User Management** — Full lifecycle management of student, teacher, and employee accounts (create, view, deactivate) via the Supabase Admin API.
 - **Student Directory** — Searchable student roster with individual profile pages at `/admin/students/[studentId]`.
@@ -49,7 +50,8 @@ AI integration, and a 24-table PostgreSQL schema — all in a single serverless 
   <img width="1600" height="674" alt="image" src="https://github.com/user-attachments/assets/b08029af-1f4d-41af-93c8-3c366e1f8a70" />
 
 
-### Teacher Portal
+### Teacher Portal :
+
 - **Personalized Dashboard** — Course load summary, upcoming exam schedule, and class attendance snapshot.
 - **Unified Marks Management** — Enter and manage the four-component grading schema (IA-1, IA-2, Others, SEE) with automatic scaling, total computation, and grade assignment; sequential entry locking enforced in the UI.
 - **Exam Management** — View and manage scheduled exams with dedicated detail pages at `/teacher/exams/[examId]`.
@@ -68,7 +70,8 @@ AI integration, and a 24-table PostgreSQL schema — all in a single serverless 
   <img width="1600" height="732" alt="image" src="https://github.com/user-attachments/assets/adc365a7-256c-478b-b1eb-c0e4b5c16513" />
 
 
-### Student Portal
+### Student Portal :
+
 - **Personalized Dashboard** — Attendance percentage, upcoming exam reminders, and active fee dues in a unified overview.
 - **Attendance Viewer** — Semester-wise visualization with per-course breakdown and a day-wise attendance grid calendar.
 - **Marks Viewer** — Full grade sheet per enrolled course: IA-1, IA-2, Others, SEE, computed total, and final letter grade.
@@ -91,7 +94,8 @@ AI integration, and a 24-table PostgreSQL schema — all in a single serverless 
   <img width="1600" height="728" alt="image" src="https://github.com/user-attachments/assets/f3acbe2a-2932-4f4e-a29a-eba9904ac341" />
 
 
-### Employee Portal
+### Employee Portal :
+
 - **Role-Scoped Dashboard** — Institutional overview statistics relevant to the employee's assigned functional area.
 - **Exam & Marks Module** (`exam_marks_management` type) — Class group management, course catalog by program at `/employee/exams/courses/[program]`, exam scheduling, marks entry using the identical IA-1/IA-2/Others/SEE schema as the teacher portal, and an exam results dashboard.
 - **Hostel Administration** (`hostel_management` type) — Manage hostel buildings, room inventory, student allocations, hostel-specific fees, and meal menu configurations.

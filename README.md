@@ -1,0 +1,91 @@
+ERP System
+
+A production-grade, full-stack ERP ecosystem featuring a seamless integration between a high-performance web dashboard and a highly responsive native mobile application.
+
+![ERP Ecosystem Overview](https://img.shields.io/badge/Architecture-Web%20%2B%20Mobile%20Native-blue)
+![Database](https://img.shields.io/badge/Database-PostgreSQL%20(Supabase)-336791)
+![Realtime](https://img.shields.io/badge/Data%20Flow-Realtime%20WebSockets-10b981)
+
+📖 Overview
+
+This repository contains the source code for a comprehensive academic and administrative ERP system. Designed to support **5,000+ concurrent users**, the architecture effectively unifies a **Next.js Web Portal** with an **Expo React Native Mobile App** through a centralized, highly-secure backend API layer powered by **Supabase**.
+
+The system strictly enforces **Role-Based Access Control (RBAC)**—scaling efficiently across Administrators, Employees, Teachers, and Students without compromising data integrity or security.
+
+## ✨ Core Features
+
+### 🔐 Enterprise-Grade Security
+- **Row Level Security (RLS)**: Enforced directly at the PostgreSQL database level preventing unauthorized data mutations regardless of the client (Web or App).
+- **Environment Virtualization**: Strict [.env](cci:7://file:///c:/Users/Admin/Desktop/ERP/erp-mobile/.env:0:0-0:0) encapsulation ensuring private service roles are never leaked to the mobile client bundle.
+
+### 🔄 Real-Time Synchronization
+- **Optimistic UI & WebSockets**: Underpinned by `supabase.channel()`, delivering real-time state synchronization. When a teacher updates grades or attendance on the web, the student's mobile dashboard updates instantly without requiring a manual refresh.
+
+### 📱 Unified Native Mobile Experience
+- **Fluid Navigation Ecosystem**: A clean 5-tab architectural pattern (Home, Analytics, Fees, Hostel, Menu) utilizing the `lucide-react-native` iconography library.
+- **Native Document Generation**: End-to-end integration of `expo-print` and `expo-sharing` to dynamically render ATS-friendly resumes and digital fee invoices as PDFs directly on the device CPU.
+
+### 🎓 Deep Modules
+- **Academic & Attendance Checkouts**: Automated SGPA/CGPA projection algorithms natively computed.
+- **Finance & Fee Processing**: Dynamic real-time invoice generation.
+- **Complete Hostel Management**: Full allocation tracking, capacity algorithms, and real-time maintenance complaint boards.
+
+## 🏗️ System Architecture
+
+### 1. Web Portal (`/src`)
+- **Framework**: Next.js 14+ (App Router)
+- **Styling**: Tailwind CSS & `shadcn/ui` components
+- **Forms & Validation**: React Hook Form + Zod
+
+### 2. Mobile Client (`/erp-mobile`)
+- **Framework**: Expo (React Native) + TypeScript
+- **Styling**: NativeWind (Tailwind mapped for native endpoints)
+- **State Management & Routing**: Expo Router + File-based Stack
+
+### 3. Backend & Database
+- **Provider**: Supabase (PostgreSQL)
+- **Authentication**: Built-in GoTrue JWT validation via context providers.
+- **File Storage**: Supabase Buckets (Image handling, resumes)
+
+## 🚀 Quick Start Guide
+
+### Prerequisites
+Make sure you have [Node.js](https://nodejs.org/) installed along with `npm` or `yarn`.
+
+### Database Configuration
+1. Initialize a Supabase project.
+2. Ensure you apply the appropriate Database schemas, RLS policies, and storage buckets.
+
+### Running the Web Portal
+
+```bash
+# Clone the repository
+git clone https://github.com/krishnateja7781/erp-system.git
+cd erp-system
+
+# Install dependencies
+npm install
+
+# Setup Environment
+cp .env.example .env.local
+# -> populate your Supabase and SMTP keys in .env.local
+
+# Start Development Server
+npm run dev
+
+### Running the Mobile Application
+
+```bash
+
+# Navigate to the mobile directory
+cd erp-mobile
+
+# Install dependencies
+npm install
+
+# Setup Environment
+cp .env.example .env
+# -> populate your public Supabase ANON keys in .env
+
+# Start Expo Engine
+npx expo start -c

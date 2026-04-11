@@ -6,8 +6,6 @@ import { Loader2 } from "lucide-react";
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { useAuthProtection } from '@/hooks/useAuthProtection';
-import { getSession } from '@/actions/auth-actions';
-import { createClient } from '@/lib/supabase-client';
 
 export default function EmployeeLayout({
   children,
@@ -15,32 +13,15 @@ export default function EmployeeLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  const [employeeType, setEmployeeType] = React.useState<string | null>(null);
   
   const {
     currentUser,
     authIsLoading,
     layoutError,
-    showEmailVerificationPrompt,
-    userEmail,
     handleLogout,
-    handleSendVerificationEmail
   } = useAuthProtection('employee');
 
-  React.useEffect(() => {
-    async function fetchEmployeeType() {
-      if (currentUser && currentUser.uid) {
-        // Fast client-side fetch since middleware already proved they are valid
-        const supabase = createClient();
-        
-        const { data } = await supabase.from('employees').select('employee_type').eq('profile_id', currentUser.uid).single();
-        if (data) setEmployeeType(data.employee_type);
-      }
-    }
-    fetchEmployeeType();
-  }, [currentUser]);
-
-  if (authIsLoading || (currentUser && !employeeType)) {
+  if (authIsLoading) {
     return (
       <div className="flex h-screen w-full items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -63,12 +44,10 @@ export default function EmployeeLayout({
   
   if (!currentUser) return null;
 
-  const enrichedUser = { ...currentUser, type: employeeType };
-
   return (
     <AppLayout
         role="employee"
-        user={enrichedUser}
+        user={currentUser}
         onLogout={handleLogout}
       >
         {children}

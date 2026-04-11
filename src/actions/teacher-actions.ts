@@ -1,6 +1,6 @@
 'use server';
 
-import { createServerSupabaseClient } from '@/lib/supabase';
+import { createServiceRoleClient as createServerSupabaseClient } from '@/lib/supabase';
 import { getSession } from './auth-actions';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -47,21 +47,28 @@ async function getTeacherId(): Promise<string | null> {
     return result.data.session.user.id;
 }
 
+async function resolveTeacherId(supabase: any, profileId: string): Promise<string | null> {
+    const { data } = await supabase.from('teachers').select('id').eq('profile_id', profileId).single();
+    return data?.id || null;
+}
+
 // ── Get Teacher's Classes ──────────────────────────────────────────────────────
 
 export async function getTeacherClasses(teacherProfileId: string) {
     const supabase = await createServerSupabaseClient();
+    const dbTeacherId = await resolveTeacherId(supabase, teacherProfileId);
+    if (!dbTeacherId) return [];
 
     const { data, error } = await supabase
         .from('classes')
-        .select('id, name, courses(id, name, code)')
-        .eq('teacher_id', teacherProfileId);
+        .select('id, program, branch, section, courses(id, name, code)')
+        .eq('teacher_id', dbTeacherId);
 
     if (error || !data) return [];
 
     return data.map((c: any) => ({
         id: c.id,
-        class: c.name,
+        class: `${c.program || ''} ${c.branch || ''} ${c.section || ''}`.trim(),
         courseCode: c.courses?.code || '',
         courseName: c.courses?.name || '',
     }));
@@ -72,10 +79,18 @@ export async function getTeacherClasses(teacherProfileId: string) {
 export async function getStudentsForClass(classId: string): Promise<StudentForClass[]> {
     const supabase = await createServerSupabaseClient();
 
+    // 1. Fetch class details to know which students belong to it
+    const { data: cls } = await supabase.from('classes').select('program, branch, semester, section').eq('id', classId).single();
+    if (!cls) return [];
+
+    // 2. Query students matching those class criteria
     const { data: studentRecords, error } = await supabase
         .from('students')
         .select('id, college_id, profiles(full_name, email)')
-        .eq('class_id', classId)
+        .eq('program', cls.program)
+        .eq('branch', cls.branch)
+        .eq('current_semester', cls.semester)
+        .eq('section', cls.section || 'A')
         .eq('is_graduated', false)
         .order('college_id');
 
@@ -93,33 +108,56 @@ export async function getStudentsForClass(classId: string): Promise<StudentForCl
 
 export async function getTeacherSchedule(teacherProfileId: string) {
     const supabase = await createServerSupabaseClient();
+    const dbTeacherId = await resolveTeacherId(supabase, teacherProfileId);
+    if (!dbTeacherId) return [];
 
-    const { data, error } = await supabase
-        .from('timetable')
-        .select('id, day, period, classes(id, name, courses(name, code))')
-        .eq('teacher_id', teacherProfileId);
+    // Get all classes assigned to this teacher
+    const { data: classesData, error: classesError } = await supabase
+        .from('classes')
+        .select('*, courses(name, code)')
+        .eq('teacher_id', dbTeacherId);
 
-    if (error || !data) return [];
+    if (classesError || !classesData || classesData.length === 0) return [];
+    
+    const classIds = classesData.map(c => c.id);
 
-    return data.map((entry: any) => ({
-        id: entry.id,
-        day: entry.day,
-        period: entry.period,
-        classId: entry.classes?.id,
-        className: entry.classes?.name,
-        courseName: entry.classes?.courses?.name,
-        courseCode: entry.classes?.courses?.code,
-    }));
+    // Get timetables for those classes
+    const { data: timetables, error: ttError } = await supabase
+        .from('timetables')
+        .select('*')
+        .in('class_id', classIds);
+
+    if (ttError || !timetables) return [];
+
+    return timetables.map((entry: any) => {
+        const cls: any = classesData.find((c: any) => c.id === entry.class_id);
+        const className = `${cls?.program} ${cls?.branch} ${cls?.section}`;
+
+        let periodVal = 1;
+        if (entry.start_time) {
+            periodVal = parseInt(entry.start_time.split(':')[0], 10);
+        }
+
+        return {
+            id: entry.id,
+            day: entry.day_of_week,
+            period: periodVal,
+            classId: entry.class_id,
+            className: className,
+            courseName: cls?.courses?.name,
+            courseCode: cls?.courses?.code,
+            teacherId: teacherProfileId
+        };
+    });
 }
-
-// ── Get Attendance Logs for Teacher ───────────────────────────────────────────
 
 export async function getTeacherAttendanceLogs(teacherProfileId: string): Promise<AttendanceLogEntry[]> {
     const supabase = await createServerSupabaseClient();
-
+    // In attendance schema, teacher_id actually points to the profile_id (originally marked_by_id)
+    
     const { data, error } = await supabase
         .from('attendance')
-        .select('class_id, date, period, classes(name, courses(name, code))')
+        .select('class_id, date, period, classes(program, branch, section, courses(name, code))')
         .eq('teacher_id', teacherProfileId)
         .order('date', { ascending: false })
         .limit(100);
@@ -131,13 +169,14 @@ export async function getTeacherAttendanceLogs(teacherProfileId: string): Promis
     for (const row of data as any[]) {
         const key = `${row.class_id}_${row.date}_${row.period}`;
         if (!grouped[key]) {
+            const clsData = row.classes || {};
             grouped[key] = {
                 classId: row.class_id,
                 date: row.date,
                 period: row.period,
-                courseName: row.classes?.courses?.name || '',
-                courseCode: row.classes?.courses?.code || '',
-                class: row.classes?.name || '',
+                courseName: clsData.courses?.name || '',
+                courseCode: clsData.courses?.code || '',
+                class: `${clsData.program || ''} ${clsData.branch || ''} ${clsData.section || ''}`.trim(),
                 studentCount: 0,
             };
         }
@@ -172,11 +211,13 @@ export async function getAttendanceForSlot(classId: string, date: string, period
 
 export async function getTeacherCoursesForMarks(teacherProfileId: string, session: string): Promise<TeacherCourseOption[]> {
     const supabase = await createServerSupabaseClient();
+    const dbTeacherId = await resolveTeacherId(supabase, teacherProfileId);
+    if (!dbTeacherId) return [];
 
     const { data, error } = await supabase
         .from('classes')
         .select('courses(id, name, code)')
-        .eq('teacher_id', teacherProfileId);
+        .eq('teacher_id', dbTeacherId);
 
     if (error || !data) return [];
 
@@ -196,32 +237,36 @@ export async function getTeacherCoursesForMarks(teacherProfileId: string, sessio
 
 export async function getTeacherSectionsForCourse(teacherProfileId: string, courseId: string): Promise<TeacherSectionOption[]> {
     const supabase = await createServerSupabaseClient();
+    const dbTeacherId = await resolveTeacherId(supabase, teacherProfileId);
+    if (!dbTeacherId) return [];
 
     const { data, error } = await supabase
         .from('classes')
-        .select('id, name')
-        .eq('teacher_id', teacherProfileId)
+        .select('id, program, branch, section')
+        .eq('teacher_id', dbTeacherId)
         .eq('course_id', courseId);
 
     if (error || !data) return [];
-    return data.map((c: any) => ({ id: c.id, name: c.name }));
+    return data.map((c: any) => ({ id: c.id, name: `${c.program || ''} ${c.branch || ''} ${c.section || ''}`.trim() }));
 }
 
 // ── Get Scheduled Exam Sessions ────────────────────────────────────────────────
 
 export async function getTeacherScheduledSessions(teacherProfileId: string): Promise<TeacherScheduledSession[]> {
     const supabase = await createServerSupabaseClient();
+    const dbTeacherId = await resolveTeacherId(supabase, teacherProfileId);
+    if (!dbTeacherId) return [];
 
-    const teacherClasses = await getTeacherClasses(teacherProfileId);
-    if (!teacherClasses.length) return [];
-
-    const classIds = teacherClasses.map(c => c.id);
+    const { data: clsData } = await supabase.from('classes').select('course_id').eq('teacher_id', dbTeacherId);
+    if (!clsData || clsData.length === 0) return [];
+    
+    const courseIds = clsData.map(c => c.course_id);
 
     const { data, error } = await supabase
-        .from('exam_schedule')
-        .select('exam_type, start_date, end_date')
-        .in('class_id', classIds)
-        .order('start_date');
+        .from('exams')
+        .select('exam_type, exam_date')
+        .in('course_id', courseIds)
+        .order('exam_date');
 
     if (error || !data) return [];
 
@@ -229,11 +274,28 @@ export async function getTeacherScheduledSessions(teacherProfileId: string): Pro
     const result: TeacherScheduledSession[] = [];
     for (const row of data as any[]) {
         const key = row.exam_type;
+        if (!key) continue;
+        
         if (!seen.has(key)) {
             seen.add(key);
-            result.push({ name: row.exam_type, startDate: row.start_date, endDate: row.end_date });
+            result.push({ name: key, startDate: row.exam_date || '', endDate: row.exam_date || '' });
+        } else {
+            // Update endDate if exam_date is later
+            const existing = result.find(r => r.name === key);
+            if (existing && row.exam_date && new Date(row.exam_date) > new Date(existing.endDate)) {
+                existing.endDate = row.exam_date;
+            }
         }
     }
+
+    if (!seen.has('Others')) {
+        result.push({ 
+            name: 'Others', 
+            startDate: new Date().toISOString(), 
+            endDate: new Date().toISOString() 
+        });
+    }
+
     return result;
 }
 
@@ -248,3 +310,4 @@ export interface TeacherClassWithStudents {
     students: any[];
 }
 export async function getStudentsByClassForTeacher(teacherProfileId: string): Promise<TeacherClassWithStudents[]> { return []; }
+

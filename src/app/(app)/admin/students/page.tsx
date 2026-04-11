@@ -11,7 +11,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Search, Loader2, AlertTriangle, MoreHorizontal, Eye, Edit, Trash2, PlusCircle } from "lucide-react";
+import { Search, Loader2, AlertTriangle, MoreHorizontal, Eye, Edit, Trash2, PlusCircle, GraduationCap } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useToast } from '@/hooks/use-toast';
 import { getStudents, deleteStudent } from '@/actions/student-actions';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
@@ -195,50 +196,97 @@ export default function AdminStudentsListPage() {
           </div>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader><TableRow className="border-border/30"><TableHead>College ID</TableHead><TableHead>Name</TableHead><TableHead>Program</TableHead><TableHead>Branch</TableHead><TableHead>Year</TableHead><TableHead>Sec</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
-            <TableBody>
-              {isLoading ? (
-                <TableRow><TableCell colSpan={8} className="text-center"><Loader2 className="inline mr-2 h-4 w-4 animate-spin" />Loading...</TableCell></TableRow>
-              ) : filteredStudents.length > 0 ? filteredStudents.map((student) => (
-                <TableRow key={student.id} className="hover:bg-indigo-50/50 dark:hover:bg-indigo-950/20 border-border/20">
-                  <TableCell className="font-medium">{student.collegeId}</TableCell>
-                  <TableCell>{student.name}</TableCell>
-                  <TableCell>{student.program}</TableCell>
-                  <TableCell>{student.branch}</TableCell>
-                  <TableCell>{student.year}</TableCell>
-                  <TableCell>{student.section}</TableCell>
-                  <TableCell>{getStatusBadge(student.status)}</TableCell>
-                  <TableCell className="text-right">
-                    <AlertDialog>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem asChild><Link href={`/admin/students/${student.id}`}><Eye className="mr-2 h-4 w-4" /> View Profile</Link></DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleEdit(student)}><Edit className="mr-2 h-4 w-4" /> Edit</DropdownMenuItem>
-                          <AlertDialogTrigger asChild><DropdownMenuItem className="text-destructive" onSelect={(e) => e.preventDefault()}><Trash2 className="mr-2 h-4 w-4" /> Delete</DropdownMenuItem></AlertDialogTrigger>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            This action cannot be undone. This will permanently delete the student profile for <span className="font-semibold">{student.name} ({student.collegeId})</span> and all associated data.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction className="bg-destructive hover:bg-destructive/90" onClick={() => confirmDelete(student.id, student.name || null)}>Delete</AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  </TableCell>
-                </TableRow>
-              )) : (
-                <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8">No students found matching criteria.</TableCell></TableRow>
-              )}
-            </TableBody>
-          </Table>
+          {isLoading ? (
+            <div className="flex flex-col items-center justify-center py-20 text-muted-foreground w-full">
+              <Loader2 className="h-8 w-8 animate-spin mb-4" />
+              <p>Loading students...</p>
+            </div>
+          ) : filteredStudents.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 text-muted-foreground w-full border-2 border-dashed rounded-xl">
+              <GraduationCap className="h-12 w-12 text-muted-foreground/50 mb-3" />
+              <p className="font-medium">No students found matching criteria.</p>
+              <p className="text-sm">Try adjusting your search or filter criteria.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pt-2">
+              {filteredStudents.map(student => (
+                <Card key={student.id} className="flex flex-col overflow-hidden hover:shadow-xl hover:-translate-y-1 transition-all duration-300 card-elevated group relative bg-card/60 backdrop-blur-sm border-border/50">
+                  <div className="h-24 bg-gradient-to-br from-violet-600 via-purple-500 to-fuchsia-600 relative overflow-hidden">
+                    <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <div className="absolute -bottom-10 -right-10 w-32 h-32 bg-white/10 rounded-full blur-2xl" />
+                  </div>
+                  <div className="px-5 pt-0 pb-5 flex-1 flex flex-col">
+                    <div className="-mt-12 mb-3 flex justify-between items-end relative z-10">
+                       <Avatar className="h-20 w-20 border-4 border-background shadow-md bg-muted">
+                         <AvatarImage src={(student as any).avatarUrl} />
+                         <AvatarFallback className="text-xl font-bold">{student.name?.substring(0,2).toUpperCase()}</AvatarFallback>
+                       </Avatar>
+                       <div className="shadow-sm">{getStatusBadge(student.status)}</div>
+                    </div>
+                    <h3 className="font-bold text-lg leading-tight truncate group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors" title={student.name}>{student.name}</h3>
+                    <p className="text-sm font-mono text-muted-foreground mb-4">{student.collegeId}</p>
+                    
+                    <div className="grid grid-cols-2 gap-y-3 gap-x-2 text-sm mt-1 mb-5 flex-1">
+                       <div className="flex flex-col">
+                         <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground/70">Program</span>
+                         <span className="font-medium truncate">{student.program}</span>
+                       </div>
+                       <div className="flex flex-col">
+                         <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground/70">Branch</span>
+                         <span className="font-medium truncate">{student.branch || '—'}</span>
+                       </div>
+                       <div className="flex flex-col">
+                         <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground/70">Year</span>
+                         <span className="font-medium">{student.year ? `Year ${student.year}` : '—'}</span>
+                       </div>
+                       <div className="flex flex-col">
+                         <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground/70">Section</span>
+                         <span className="font-medium">{student.section || '—'}</span>
+                       </div>
+                    </div>
+                    
+                    <div className="flex flex-col sm:flex-row items-center gap-2 mt-auto pt-4 border-t border-border/50">
+                       <AlertDialog>
+                         <AlertDialogTrigger asChild>
+                           <Button variant="outline" size="icon" className="h-9 w-9 text-destructive border-destructive/20 hover:bg-destructive/10 hover:border-destructive/30 flex-shrink-0" title="Delete Student">
+                             <Trash2 className="h-4 w-4" />
+                           </Button>
+                         </AlertDialogTrigger>
+                         <AlertDialogContent>
+                           <AlertDialogHeader>
+                             <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                             <AlertDialogDescription>
+                               This will permanently delete the student profile for <span className="font-semibold">{student.name} ({student.collegeId})</span> and all associated data.
+                             </AlertDialogDescription>
+                           </AlertDialogHeader>
+                           <AlertDialogFooter>
+                             <AlertDialogCancel>Cancel</AlertDialogCancel>
+                             <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => confirmDelete(student.id, student.name || null)}>Delete</AlertDialogAction>
+                           </AlertDialogFooter>
+                         </AlertDialogContent>
+                       </AlertDialog>
+                       
+                       <Button 
+                         className="flex-1 gap-2 bg-purple-50/50 hover:bg-purple-100 text-purple-700 border border-purple-200 dark:bg-purple-950/30 dark:hover:bg-purple-900/50 dark:text-purple-300 dark:border-purple-800"
+                         variant="secondary"
+                         onClick={() => handleEdit(student)}
+                       >
+                         <Edit className="h-4 w-4" /> Edit
+                       </Button>
+                       
+                       <Button 
+                         className="flex-1 gap-2"
+                         variant="default"
+                         onClick={() => router.push(`/admin/students/${student.id}`)}
+                       >
+                         <Eye className="h-4 w-4" /> View
+                       </Button>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
         </CardContent>
         <CardFooter>
           <p className="text-xs text-muted-foreground">Showing {filteredStudents.length} of {allStudents.length} students. Use search and filters for specific results.</p>

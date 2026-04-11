@@ -308,7 +308,7 @@ export default function TeacherMarksPage() {
                                 <Button variant="outline" onClick={handleCalculateAll} disabled={isLoadingRoster || isSaving || students.length === 0} className="gap-2 border-white/30 text-white hover:bg-white/20">
                                     <Calculator className="h-4 w-4" /> Calculate Grades
                                 </Button>
-                                <p className="text-[10px] text-white/50 italic">Requires IA-1, IA-2 & SEE</p>
+                                <p className="text-[10px] text-white/50 italic">Requires IA-1, IA-2, Others & SEE</p>
                             </div>
                         )}
                         <Button onClick={handleSaveAll} disabled={isLoadingRoster || isSaving || !hasUnsavedChanges} className="gap-2 bg-white text-emerald-700 hover:bg-white/90 shadow-md">
@@ -376,12 +376,13 @@ export default function TeacherMarksPage() {
                                         const mark = marks[student.id] ?? {};
                                         const isIa1Disabled = activeSession !== 'IA-1';
                                         const isIa2Disabled = activeSession !== 'IA-2' || mark.ia1 === null;
-                                        const isOtherDisabled = activeSession !== 'Other';
-                                        const isSeeDisabled = !isSeeMode || mark.ia1 === null || mark.ia2 === null;
+                                        const isOtherDisabled = activeSession !== 'Others' || mark.ia1 === null || mark.ia2 === null;
+                                        const isSeeDisabled = !isSeeMode || mark.ia1 === null || mark.ia2 === null || mark.other === null;
 
                                         const getDisabledLabel = () => {
                                             if (activeSession === 'IA-2' && mark.ia1 === null) return "Enter IA-1 first";
-                                            if (isSeeMode && (mark.ia1 === null || mark.ia2 === null)) return "Enter IA-1 & IA-2 first";
+                                            if (activeSession === 'Others' && (mark.ia1 === null || mark.ia2 === null)) return "Enter IA-1 & IA-2 first";
+                                            if (isSeeMode && (mark.ia1 === null || mark.ia2 === null || mark.other === null)) return "Enter IA-1, IA-2 & Others first";
                                             return null;
                                         };
                                         const disabledLabel = getDisabledLabel();
@@ -416,13 +417,18 @@ export default function TeacherMarksPage() {
                                                     </div>
                                                 </TableCell>
                                                 <TableCell className="text-center">
-                                                    <Input
-                                                        type="number"
-                                                        defaultValue={mark.other ?? ''}
-                                                        onChange={e => handleMarkChange(student.id, 'other', e.target.value)}
-                                                        disabled={isOtherDisabled}
-                                                        className="h-9 w-20 mx-auto text-center font-medium"
-                                                    />
+                                                    <div className="flex flex-col items-center gap-1">
+                                                        <Input
+                                                            type="number"
+                                                            defaultValue={mark.other ?? ''}
+                                                            onChange={e => handleMarkChange(student.id, 'other', e.target.value)}
+                                                            disabled={isOtherDisabled}
+                                                            className="h-9 w-20 mx-auto text-center font-medium"
+                                                        />
+                                                        {activeSession === 'Others' && (mark.ia1 === null || mark.ia2 === null) && (
+                                                            <span className="text-[10px] text-amber-600 font-medium whitespace-nowrap">Req. IA-1 & 2</span>
+                                                        )}
+                                                    </div>
                                                 </TableCell>
                                                 <TableCell className="text-center">
                                                     <div className="flex flex-col items-center gap-1">
@@ -433,8 +439,8 @@ export default function TeacherMarksPage() {
                                                             disabled={isSeeDisabled}
                                                             className="h-9 w-20 mx-auto text-center font-medium"
                                                         />
-                                                        {isSeeMode && (mark.ia1 === null || mark.ia2 === null) && (
-                                                            <span className="text-[10px] text-amber-600 font-medium whitespace-nowrap">Req. IA-1 & 2</span>
+                                                        {isSeeMode && (mark.ia1 === null || mark.ia2 === null || mark.other === null) && (
+                                                            <span className="text-[10px] text-amber-600 font-medium whitespace-nowrap">Req. IA-1, 2, Others</span>
                                                         )}
                                                     </div>
                                                 </TableCell>

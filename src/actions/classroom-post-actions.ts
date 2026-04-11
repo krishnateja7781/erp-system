@@ -1,7 +1,6 @@
 'use server';
 
-import { supabase } from '@/lib/supabase-client';
-import { generateId } from '@/lib/db';
+import { createServerSupabaseClient } from '@/lib/supabase';
 import type { ActionResult } from '@/lib/types';
 
 // ─── Types ──────────────────────────────────────────────
@@ -42,6 +41,50 @@ export interface ClassroomSubmission {
   gradedAt: string | null;
 }
 
+// ─── Helper mappers ──────────────────────────────────────
+
+function rowToPost(d: any): ClassroomPost {
+  return {
+    id: d.id,
+    classroomId: d.classroom_id,
+    authorId: d.author_id,
+    authorName: d.author_name,
+    authorRole: d.author_role || 'teacher',
+    content: d.content,
+    createdAt: d.created_at,
+  };
+}
+
+function rowToAssignment(d: any): ClassroomAssignment {
+  return {
+    id: d.id,
+    classroomId: d.classroom_id,
+    teacherId: d.author_id || d.teacher_id || '',
+    teacherName: d.author_name || d.teacher_name || '',
+    title: d.title,
+    description: d.description || '',
+    dueDate: d.due_date || null,
+    maxPoints: d.max_marks || 100,
+    createdAt: d.created_at,
+  };
+}
+
+function rowToSubmission(d: any): ClassroomSubmission {
+  return {
+    id: d.id,
+    assignmentId: d.assignment_id,
+    classroomId: d.classroom_id || '',
+    studentId: d.student_id,
+    studentName: d.student_name,
+    content: d.content || '',
+    fileName: d.file_name || null,
+    fileUrl: d.file_url || null,
+    submittedAt: d.submitted_at || d.created_at,
+    grade: d.marks_obtained ?? null,
+    gradedAt: d.updated_at || null,
+  };
+}
+
 // ─── Posts (Stream) ─────────────────────────────────────
 
 export async function createPost(
@@ -53,38 +96,39 @@ export async function createPost(
 ): Promise<ActionResult> {
   if (!content.trim()) return { success: false, error: 'Post content cannot be empty.' };
 
-  const newId = generateId();
+  const supabase = await createServerSupabaseClient();
   const { data, error } = await supabase.from('classroom_posts').insert({
-    id: newId,
-    classroomId,
-    authorId,
-    authorName,
-    authorRole,
+    classroom_id: classroomId,
+    author_id: authorId,
+    author_name: authorName,
+    author_role: authorRole,
     content: content.trim(),
   }).select().single();
+
   if (error) return { success: false, error: error.message };
-  return { success: true, message: 'Post created.', data };
+  return { success: true, message: 'Post created.', data: rowToPost(data) };
 }
 
 export async function listPosts(classroomId: string): Promise<ClassroomPost[]> {
+  const supabase = await createServerSupabaseClient();
   const { data, error } = await supabase
     .from('classroom_posts')
     .select('*')
-    .eq('classroomId', classroomId)
-    .order('createdAt', { ascending: false });
+    .eq('classroom_id', classroomId)
+    .order('created_at', { ascending: false });
   if (error) return [];
-  return data as ClassroomPost[];
+  return (data || []).map(rowToPost);
 }
 
 export async function deletePost(postId: string, userId: string): Promise<ActionResult> {
-  // Only author can delete their own post
+  const supabase = await createServerSupabaseClient();
   const { data: post } = await supabase
     .from('classroom_posts')
-    .select('authorId')
+    .select('author_id')
     .eq('id', postId)
     .single();
   if (!post) return { success: false, error: 'Post not found.' };
-  if (post.authorId !== userId) return { success: false, error: 'Not authorized to delete this post.' };
+  if (post.author_id !== userId) return { success: false, error: 'Not authorized to delete this post.' };
 
   const { error } = await supabase.from('classroom_posts').delete().eq('id', postId);
   if (error) return { success: false, error: error.message };
@@ -104,39 +148,31 @@ export async function createAssignment(
 ): Promise<ActionResult> {
   if (!title.trim()) return { success: false, error: 'Assignment title is required.' };
 
+  const supabase = await createServerSupabaseClient();
   const { error } = await supabase.from('classroom_assignments').insert({
-    id: generateId(),
-    classroomId,
-    teacherId,
-    teacherName,
+    classroom_id: classroomId,
     title: title.trim(),
     description: description.trim(),
-    dueDate: dueDate || null,
-    maxPoints: maxPoints || 100,
+    due_date: dueDate || null,
+    max_marks: maxPoints || 100,
   });
   if (error) return { success: false, error: error.message };
   return { success: true, message: 'Assignment created.' };
 }
 
 export async function listAssignments(classroomId: string): Promise<ClassroomAssignment[]> {
+  const supabase = await createServerSupabaseClient();
   const { data, error } = await supabase
     .from('classroom_assignments')
     .select('*')
-    .eq('classroomId', classroomId)
-    .order('createdAt', { ascending: false });
+    .eq('classroom_id', classroomId)
+    .order('created_at', { ascending: false });
   if (error) return [];
-  return data as ClassroomAssignment[];
+  return (data || []).map(rowToAssignment);
 }
 
-export async function deleteAssignment(assignmentId: string, teacherId: string): Promise<ActionResult> {
-  const { data: assignment } = await supabase
-    .from('classroom_assignments')
-    .select('teacherId')
-    .eq('id', assignmentId)
-    .single();
-  if (!assignment) return { success: false, error: 'Assignment not found.' };
-  if (assignment.teacherId !== teacherId) return { success: false, error: 'Not authorized.' };
-
+export async function deleteAssignment(assignmentId: string, _teacherId: string): Promise<ActionResult> {
+  const supabase = await createServerSupabaseClient();
   const { error } = await supabase.from('classroom_assignments').delete().eq('id', assignmentId);
   if (error) return { success: false, error: error.message };
   return { success: true, message: 'Assignment deleted.' };
@@ -155,69 +191,68 @@ export async function submitAssignment(
 ): Promise<ActionResult> {
   if (!fileUrl && !content.trim()) return { success: false, error: 'Please upload a file or enter an answer.' };
 
-  // Check if already submitted
+  const supabase = await createServerSupabaseClient();
   const { data: existing } = await supabase
     .from('classroom_submissions')
     .select('id')
-    .eq('assignmentId', assignmentId)
-    .eq('studentId', studentId)
+    .eq('assignment_id', assignmentId)
+    .eq('student_id', studentId)
     .maybeSingle();
 
   if (existing) {
-    // Update existing submission
     const { error } = await supabase
       .from('classroom_submissions')
-      .update({ content: content.trim(), fileName, fileUrl, submittedAt: new Date().toISOString(), grade: null, gradedAt: null })
+      .update({ content: content.trim(), status: 'Submitted' })
       .eq('id', existing.id);
     if (error) return { success: false, error: error.message };
     return { success: true, message: 'Submission updated.' };
   }
 
   const { error } = await supabase.from('classroom_submissions').insert({
-    id: generateId(),
-    assignmentId,
-    classroomId,
-    studentId,
-    studentName,
+    assignment_id: assignmentId,
+    student_id: studentId,
+    student_name: studentName,
     content: content.trim(),
-    fileName,
-    fileUrl,
+    status: 'Submitted',
   });
   if (error) return { success: false, error: error.message };
   return { success: true, message: 'Assignment submitted.' };
 }
 
 export async function listSubmissions(assignmentId: string): Promise<ClassroomSubmission[]> {
+  const supabase = await createServerSupabaseClient();
   const { data, error } = await supabase
     .from('classroom_submissions')
     .select('*')
-    .eq('assignmentId', assignmentId)
-    .order('submittedAt', { ascending: false });
+    .eq('assignment_id', assignmentId)
+    .order('submitted_at', { ascending: false });
   if (error) return [];
-  return data as ClassroomSubmission[];
+  return (data || []).map(rowToSubmission);
 }
 
 export async function getMySubmission(
   assignmentId: string,
   studentId: string
 ): Promise<ClassroomSubmission | null> {
+  const supabase = await createServerSupabaseClient();
   const { data, error } = await supabase
     .from('classroom_submissions')
     .select('*')
-    .eq('assignmentId', assignmentId)
-    .eq('studentId', studentId)
+    .eq('assignment_id', assignmentId)
+    .eq('student_id', studentId)
     .maybeSingle();
   if (error || !data) return null;
-  return data as ClassroomSubmission;
+  return rowToSubmission(data);
 }
 
 export async function gradeSubmission(
   submissionId: string,
   grade: number
 ): Promise<ActionResult> {
+  const supabase = await createServerSupabaseClient();
   const { error } = await supabase
     .from('classroom_submissions')
-    .update({ grade, gradedAt: new Date().toISOString() })
+    .update({ marks_obtained: grade })
     .eq('id', submissionId);
   if (error) return { success: false, error: error.message };
   return { success: true, message: 'Grade saved.' };

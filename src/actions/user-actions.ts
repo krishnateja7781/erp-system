@@ -103,3 +103,4 @@ export async function getUserSettings(uid: string): Promise<{ success: boolean; 
         return { success: false, error: 'Failed to fetch settings.' };
     }
 }
+

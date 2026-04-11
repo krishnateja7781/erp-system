@@ -1,6 +1,6 @@
 'use server';
 
-import { createServerSupabaseClient } from '@/lib/supabase';
+import { createServiceRoleClient as createServerSupabaseClient } from '@/lib/supabase';
 import type { ActionResult, ScheduleEntry } from '@/lib/types';
 
 export interface TimetableFilters {
@@ -65,7 +65,7 @@ export async function getScheduleForClass(selected: any): Promise<FullSchedule> 
             // Only consider classes that match the program/branch for the mapped course
             if (c.courses.program !== program || c.courses.branch !== branch) continue;
             
-            const teacherId = c.teachers?.profile_id || 'unassigned';
+                    const teacherId = c.teachers?.profile_id || 'unassigned';
             const teacherName = c.teachers?.profiles?.full_name || 'Unassigned';
             
             availableCourses.push({
@@ -74,6 +74,11 @@ export async function getScheduleForClass(selected: any): Promise<FullSchedule> 
                 teacherId: teacherId,
                 teacherName: teacherName
             });
+            
+            // Always ensure the teacher appears in the Teacher View, even if they have an empty schedule
+            if (!teacherSchedulesMap.has(teacherId)) {
+                teacherSchedulesMap.set(teacherId, { teacher: { id: teacherId, name: teacherName }, schedule: [] });
+            }
             
             const { data: timetables } = await supabase.from('timetables').select('*').eq('class_id', c.id);
             if (timetables) {
@@ -98,9 +103,6 @@ export async function getScheduleForClass(selected: any): Promise<FullSchedule> 
                     
                     studentSchedule.push(entry);
                     
-                    if (!teacherSchedulesMap.has(teacherId)) {
-                        teacherSchedulesMap.set(teacherId, { teacher: { id: teacherId, name: teacherName }, schedule: [] });
-                    }
                     teacherSchedulesMap.get(teacherId)!.schedule.push(entry);
                 });
             }
@@ -139,14 +141,18 @@ export async function saveTimetableBulk(payload: any): Promise<ActionResult> {
         // Find the specific class ID for this course
         const targetClass = classList?.find(c => c.courses?.code === slot.courseId);
         if (targetClass) {
-            await supabase.from('timetables').insert({
+            const { error: insertErr } = await supabase.from('timetables').insert({
                 class_id: targetClass.id,
                 day_of_week: slot.day,
                 start_time: `0${slot.period}:00:00`,
                 end_time: `0${slot.period}:50:00`
             });
+            if (insertErr) {
+                return { success: false, error: 'Database Error: ' + insertErr.message };
+            }
         }
     }
     
     return { success: true, message: 'Timetable saved.' };
 }
+

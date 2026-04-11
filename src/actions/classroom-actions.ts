@@ -1,11 +1,8 @@
 
 'use server';
 
-import { readCollection, writeCollection, findOneWhere, findWhere, insertDoc, updateDoc, deleteDoc, generateId, nowISO } from '@/lib/db';
+import { createServerSupabaseClient } from '@/lib/supabase';
 import type { Classroom, ActionResult } from '@/lib/types';
-
-
-interface CreateClassroomPayload { name: string; section?: string; subject?: string; ownerId: string; ownerName: string; }
 
 function nanoidSimple(len = 6): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -14,16 +11,49 @@ function nanoidSimple(len = 6): string {
     return result;
 }
 
+/** Map a Supabase snake_case row → camelCase Classroom */
+function rowToClassroom(d: any): Classroom {
+    return {
+        id: d.id,
+        name: d.name,
+        section: d.section || '',
+        subject: d.subject || '',
+        ownerId: d.owner_id,
+        ownerName: d.owner_name,
+        memberUids: d.member_uids || [],
+        theme: d.theme || 'theme-0',
+        inviteCode: d.invite_code,
+        googleCourseId: d.google_course_id || null,
+        messages: d.messages || {},
+        createdAt: d.created_at || new Date().toISOString(),
+    } as Classroom;
+}
+
+interface CreateClassroomPayload { name: string; section?: string; subject?: string; ownerId: string; ownerName: string; }
+
 export async function createClassroom(payload: CreateClassroomPayload): Promise<ActionResult> {
     const { name, section, subject, ownerId, ownerName } = payload;
     if (!name || !ownerId || !ownerName) return { success: false, error: 'Missing required fields.' };
     try {
-        const id = generateId();
+        const supabase = await createServerSupabaseClient();
         const inviteCode = nanoidSimple();
-        const now = nowISO();
-        await insertDoc('classrooms', { id, name, section: section || '', subject: subject || '', ownerId, ownerName, memberUids: [ownerId], theme: `theme-${Math.floor(Math.random() * 5)}`, inviteCode, messages: {}, createdAt: now, updatedAt: now });
-        return { success: true, message: 'Classroom created successfully.', classroomId: id };
-    } catch { return { success: false, error: 'Failed to create classroom.' }; }
+        const { data, error } = await supabase.from('classrooms').insert({
+            name,
+            section: section || '',
+            subject: subject || '',
+            owner_id: ownerId,
+            owner_name: ownerName,
+            member_uids: [ownerId],
+            theme: `theme-${Math.floor(Math.random() * 5)}`,
+            invite_code: inviteCode,
+            messages: {},
+        }).select('id').single();
+
+        if (error) throw error;
+        return { success: true, message: 'Classroom created successfully.', classroomId: data.id };
+    } catch (e: any) {
+        return { success: false, error: e.message || 'Failed to create classroom.' };
+    }
 }
 
 interface JoinClassroomPayload { inviteCode: string; studentUid: string; }
@@ -31,70 +61,126 @@ export async function joinClassroom(payload: JoinClassroomPayload): Promise<Acti
     const { inviteCode, studentUid } = payload;
     if (!inviteCode || !studentUid) return { success: false, error: 'Invite code and student user ID are required.' };
     try {
-        const classroom = await findOneWhere<any>('classrooms', (c) => c.inviteCode === inviteCode.trim());
-        if (!classroom) return { success: false, error: 'Invalid invite code.' };
-        if (classroom.memberUids?.includes(studentUid)) return { success: true, message: 'You are already a member of this classroom.', classroomId: classroom.id };
-        await updateDoc('classrooms', classroom.id, { memberUids: [...(classroom.memberUids || []), studentUid] } as any);
+        const supabase = await createServerSupabaseClient();
+        const { data: classroom, error } = await supabase
+            .from('classrooms')
+            .select('*')
+            .eq('invite_code', inviteCode.trim())
+            .single();
+
+        if (error || !classroom) return { success: false, error: 'Invalid invite code.' };
+        const memberUids: string[] = classroom.member_uids || [];
+        if (memberUids.includes(studentUid)) return { success: true, message: 'You are already a member of this classroom.', classroomId: classroom.id };
+
+        const { error: updateError } = await supabase
+            .from('classrooms')
+            .update({ member_uids: [...memberUids, studentUid] })
+            .eq('id', classroom.id);
+
+        if (updateError) throw updateError;
         return { success: true, message: 'Successfully joined the classroom.', classroomId: classroom.id };
-    } catch { return { success: false, error: 'Failed to join classroom due to a server error.' }; }
+    } catch (e: any) {
+        return { success: false, error: e.message || 'Failed to join classroom due to a server error.' };
+    }
 }
 
 export async function getMyClassrooms(userId: string): Promise<Classroom[]> {
     if (!userId) return [];
     try {
-        return (await findWhere<any>('classrooms', (c) => (c.memberUids || []).includes(userId)))
-            .map((d: any) => ({ id: d.id, name: d.name, section: d.section, subject: d.subject, ownerId: d.ownerId, ownerName: d.ownerName, memberUids: d.memberUids, theme: d.theme, inviteCode: d.inviteCode, googleCourseId: d.googleCourseId || null, messages: d.messages || {}, createdAt: d.createdAt || new Date().toISOString() } as Classroom));
+        const supabase = await createServerSupabaseClient();
+        const { data, error } = await supabase
+            .from('classrooms')
+            .select('*')
+            .contains('member_uids', [userId])
+            .order('created_at', { ascending: false });
+
+        if (error || !data) return [];
+        return data.map(rowToClassroom);
     } catch { return []; }
 }
 
 export async function deleteClassroom(classroomId: string, userId: string): Promise<ActionResult> {
     if (!classroomId || !userId) return { success: false, error: 'Classroom ID and User ID are required.' };
     try {
-        const classroom = await findOneWhere<any>('classrooms', (c) => c.id === classroomId);
-        if (!classroom) return { success: false, error: 'Classroom not found.' };
-        if (classroom.ownerId !== userId) return { success: false, error: 'You are not authorized to delete this classroom.' };
-        await deleteDoc('classrooms', classroomId);
+        const supabase = await createServerSupabaseClient();
+        const { data: classroom, error } = await supabase
+            .from('classrooms')
+            .select('owner_id, name')
+            .eq('id', classroomId)
+            .single();
+
+        if (error || !classroom) return { success: false, error: 'Classroom not found.' };
+        if (classroom.owner_id !== userId) return { success: false, error: 'You are not authorized to delete this classroom.' };
+
+        const { error: delError } = await supabase.from('classrooms').delete().eq('id', classroomId);
+        if (delError) throw delError;
         return { success: true, message: `Classroom "${classroom.name}" has been deleted.` };
-    } catch { return { success: false, error: 'An unexpected error occurred while deleting the classroom.' }; }
+    } catch (e: any) {
+        return { success: false, error: e.message || 'An unexpected error occurred while deleting the classroom.' };
+    }
 }
 
 export async function getClassroom(classroomId: string): Promise<Classroom | null> {
     try {
-        const d = await findOneWhere<any>('classrooms', (c) => c.id === classroomId);
-        if (!d) return null;
-        return { id: d.id, name: d.name, section: d.section, subject: d.subject, ownerId: d.ownerId, ownerName: d.ownerName, memberUids: d.memberUids, theme: d.theme, inviteCode: d.inviteCode, googleCourseId: d.googleCourseId || null, messages: d.messages || {}, createdAt: d.createdAt || new Date().toISOString() } as Classroom;
+        const supabase = await createServerSupabaseClient();
+        const { data, error } = await supabase
+            .from('classrooms')
+            .select('*')
+            .eq('id', classroomId)
+            .single();
+
+        if (error || !data) return null;
+        return rowToClassroom(data);
     } catch { return null; }
 }
 
-// Link a Google Classroom course ID to an ERP classroom
 export async function linkGoogleCourseId(classroomId: string, googleCourseId: string): Promise<{ success: boolean; error?: string }> {
     try {
-        const updated = await updateDoc('classrooms', classroomId, { googleCourseId } as any);
-        if (!updated) return { success: false, error: 'Failed to update classroom record' };
+        const supabase = await createServerSupabaseClient();
+        const { error } = await supabase
+            .from('classrooms')
+            .update({ google_course_id: googleCourseId })
+            .eq('id', classroomId);
+
+        if (error) return { success: false, error: error.message };
         return { success: true };
     } catch {
         return { success: false, error: 'Server error while linking Google Course ID' };
     }
 }
 
-// Get member details (name, email, role) for a list of UIDs
 export async function getClassroomMembers(memberUids: string[]): Promise<{ uid: string; name: string; email: string; role: string }[]> {
     if (!memberUids || memberUids.length === 0) return [];
     try {
-        const users = await readCollection<any>('users');
-        const students = await readCollection<any>('students');
-        const teachers = await readCollection<any>('teachers');
+        const supabase = await createServerSupabaseClient();
+
+        // Fetch from profiles table (primary source)
+        const { data: profiles } = await supabase
+            .from('profiles')
+            .select('id, full_name, role')
+            .in('id', memberUids);
+
+        // Fetch from teachers table for name fallback
+        const { data: teachers } = await supabase
+            .from('teachers')
+            .select('profile_id, name')
+            .in('profile_id', memberUids);
+
+        // Fetch from students table for name fallback
+        const { data: students } = await supabase
+            .from('students')
+            .select('profile_id, name')
+            .in('profile_id', memberUids);
 
         return memberUids.map(uid => {
-            const user = users.find((u: any) => u.uid === uid || u.id === uid);
-            const student = students.find((s: any) => s.uid === uid || s.id === uid);
-            const teacher = teachers.find((t: any) => t.uid === uid || t.id === uid);
+            const profile = profiles?.find(p => p.id === uid);
+            const teacher = teachers?.find(t => t.profile_id === uid);
+            const student = students?.find(s => s.profile_id === uid);
 
-            const name = user?.name || student?.name || teacher?.name || 'Unknown';
-            const email = user?.email || student?.email || teacher?.email || '';
-            const role = teacher ? 'teacher' : student ? 'student' : user?.role || 'member';
+            const name = profile?.full_name || teacher?.name || student?.name || 'Unknown';
+            const role = profile?.role || (teacher ? 'teacher' : student ? 'student' : 'member');
 
-            return { uid, name, email, role };
+            return { uid, name, email: '', role };
         });
     } catch {
         return memberUids.map(uid => ({ uid, name: 'Unknown', email: '', role: 'member' }));

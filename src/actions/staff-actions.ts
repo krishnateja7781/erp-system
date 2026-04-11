@@ -6,7 +6,7 @@ import type { AddStaffFormValues } from '@/components/admin/staff/add-staff-dial
 import { generatePassword } from '@/lib/utils';
 
 export async function getStaff(): Promise<StaffMember[]> {
-  const supabase = await createServerSupabaseClient()
+  const supabase = await createServiceRoleClient()
   
   const [teachersRes, employeesRes] = await Promise.all([
     supabase.from('teachers').select('*, profiles(*)'),
@@ -16,30 +16,30 @@ export async function getStaff(): Promise<StaffMember[]> {
   const teachers = (teachersRes.data || []).map(t => ({
     id: t.id,
     uid: t.profile_id,
-    name: t.profiles?.full_name,
+    name: t.profiles?.full_name || t.profiles?.email || 'Unknown',
     email: t.profiles?.email,
-    staffId: t.employee_code,
+    staffId: t.employee_code || t.id,
     role: 'teacher' as any,
     department: t.department,
     position: t.designation || 'Teacher',
-    status: 'Active',
-    program: 'B.Tech'
+    status: t.status || 'Active',
+    program: t.program || 'B.Tech'
   }));
 
   const staffEmployees = (employeesRes.data || []).map(e => ({
     id: e.id,
     uid: e.profile_id,
-    name: e.profiles?.full_name,
+    name: e.profiles?.full_name || e.profiles?.email || 'Unknown',
     email: e.profiles?.email,
-    staffId: e.employee_code,
+    staffId: e.employee_code || e.id,
     role: e.employee_type === 'super_admin' ? 'super_admin' : 'employee',
-    department: e.department,
-    position: e.employee_type === 'super_admin' ? 'Administrator' : 'Staff',
-    status: 'Active',
+    department: e.employee_type || e.department,
+    position: e.designation || (e.employee_type === 'super_admin' ? 'Administrator' : 'Staff'),
+    status: e.status || 'Active',
     program: 'General Admin'
   }));
 
-  return [...teachers, ...staffEmployees].filter(s => s.name);
+  return [...teachers, ...staffEmployees];
 }
 
 export async function getTeachers(): Promise<StaffMember[]> {
@@ -223,3 +223,4 @@ export async function deleteTeacher(teacherDocId: string): Promise<ActionResult>
   
   return { success: true, message: 'Staff member deleted.' };
 }
+

@@ -1,6 +1,6 @@
 'use server';
 
-import { createServerSupabaseClient } from '@/lib/supabase';
+import { createServiceRoleClient as createServerSupabaseClient } from '@/lib/supabase';
 import type { ActionResult } from '@/lib/types';
 
 export interface StudentAttendanceRow {
@@ -168,3 +168,4 @@ export async function saveAttendance(payload: SaveAttendancePayload): Promise<Ac
 
     return { success: true, message: `Attendance saved for ${inserts.length} students.` };
 }
+

@@ -1,7 +1,10 @@
 'use server'
 
-import { createServerSupabaseClient, createServiceRoleClient } from '@/lib/supabase'
+import { createServiceRoleClient } from '@/lib/supabase'
+// All DB reads / writes use service role to bypass RLS (these are server-only actions)
+const createServerSupabaseClient = createServiceRoleClient
 import { getSession } from './auth-actions';
+import { generatePassword } from '@/lib/utils';
 
 export async function createStudentAccount(data: any) {
   const adminSupabase = await createServiceRoleClient()
@@ -19,7 +22,7 @@ export async function createStudentAccount(data: any) {
   const finalCollegeId = `${idPrefix}${nextSeq}`;
 
   const email = data.email || `${finalCollegeId.toLowerCase()}@student.edu.in`;
-  const password = data.password || 'Student@123';
+  const password = data.password || generatePassword(data.firstName || data.fullName, data.dob) || 'Student@123';
   
   const { data: authData, error: authError } = await adminSupabase.auth.admin.createUser({
     email,
@@ -126,6 +129,8 @@ export async function getStudents() {
     year: s.current_year,
     semester: s.current_semester,
     email: s.profiles?.email,
+    gender: s.gender,
+    bloodGroup: s.blood_group,
     isHosteler: s.is_hosteler,
     type: s.is_hosteler ? 'Hosteler' : 'Day Scholar',
     section: 'A',
@@ -146,7 +151,9 @@ export async function updateStudent(id: string, data: any) {
   if (data.year) updatePayload.current_year = parseInt(data.year)
   if (data.semester) updatePayload.current_semester = parseInt(data.semester)
   if (data.collegeId) updatePayload.college_id = data.collegeId
-  if (data.type) updatePayload.is_hosteler = data.type === 'Hosteler'
+  if (data.type) {
+    updatePayload.is_hosteler = data.type === 'Hosteler';
+  }
 
   if (Object.keys(updatePayload).length > 0) {
     const { error } = await adminSupabase.from('students').update(updatePayload).eq('id', id)
@@ -204,7 +211,7 @@ export async function getMyStudentProfile() {
 
   const { data: student, error } = await supabase
     .from('students')
-    .select('*, profiles(full_name, email, phone, avatar_url)')
+    .select('*, profiles(full_name, email, phone, profile_picture_url)')
     .eq('profile_id', userId)
     .single();
 
@@ -217,7 +224,7 @@ export async function getMyStudentProfile() {
     name: (student as any).profiles?.full_name || 'Student',
     email: (student as any).profiles?.email || '',
     phone: (student as any).profiles?.phone || '',
-    avatarUrl: (student as any).profiles?.avatar_url || '',
+    avatarUrl: (student as any).profiles?.profile_picture_url || '',
     program: student.program,
     branch: student.branch,
     semester: student.current_semester,
@@ -277,13 +284,45 @@ export async function getStudentAttendanceDetails(studentId: string) {
 
   const { data: attendanceData } = await supabase
     .from('attendance')
-    .select('*, classes(semester, courses(code, name))')
+    .select('id, date, period, status, classes(semester, courses(code, name))')
     .eq('student_id', studentId);
 
-  return {
-    logs: [] as any[],
-    summary: [] as any[]
-  };
+  const logs = (attendanceData || []).map((a: any) => ({
+      id: a.id,
+      date: a.date,
+      period: a.period,
+      status: a.status,
+      semester: a.classes?.semester,
+      courseCode: a.classes?.courses?.code,
+      courseName: a.classes?.courses?.name
+  }));
+
+  const semestersMap = new Map<number, Map<string, any>>();
+  
+  (attendanceData || []).forEach((a: any) => {
+      const sem = a.classes?.semester || 1;
+      const cCode = a.classes?.courses?.code || 'UNK';
+      const cName = a.classes?.courses?.name || 'Unknown';
+
+      if (!semestersMap.has(sem)) semestersMap.set(sem, new Map());
+      const courseMap = semestersMap.get(sem)!;
+
+      if (!courseMap.has(cCode)) {
+          courseMap.set(cCode, { courseCode: cCode, courseName: cName, attended: 0, total: 0 });
+      }
+      const stats = courseMap.get(cCode)!;
+      stats.total += 1;
+      if (a.status === 'Present') {
+          stats.attended += 1;
+      }
+  });
+
+  const summary = Array.from(semestersMap.entries()).map(([semester, coursesMap]) => ({
+      semester,
+      courses: Array.from(coursesMap.values())
+  }));
+
+  return { logs, summary };
 }
 
 // ── Student Performance API ────────────────────────────────────────────────────
@@ -315,26 +354,80 @@ export async function getStudentPerformanceData(studentId: string): Promise<Stud
     externals: m.see || 0,
   }));
 
+  const { data: attendanceLogs } = await supabase
+    .from('attendance')
+    .select('date, status')
+    .eq('student_id', studentId);
+
+  const monthlyStats: Record<string, { total: number; present: number }> = {};
+  (attendanceLogs || []).forEach((log: any) => {
+    if (!log.date) return;
+    try {
+        const d = new Date(log.date);
+        // Ensure month is short text like "Jan"
+        const month = d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
+        if (!monthlyStats[month]) monthlyStats[month] = { total: 0, present: 0 };
+        monthlyStats[month].total++;
+        if (log.status === 'Present') monthlyStats[month].present++;
+    } catch (e) {
+        /* Ignore invalid dates */
+    }
+  });
+
+  const monthsOrder = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  
+  const attendanceData = Object.entries(monthlyStats)
+    .map(([month, stats]) => ({
+        month,
+        percentage: Math.round((stats.present / stats.total) * 100)
+    }))
+    .sort((a, b) => monthsOrder.indexOf(a.month) - monthsOrder.indexOf(b.month));
+
   return {
     marksData,
-    attendanceData: [
-      { month: 'Jan', percentage: 85 },
-      { month: 'Feb', percentage: 90 },
-      { month: 'Mar', percentage: 88 },
-      { month: 'Apr', percentage: 92 },
-      { month: 'May', percentage: 95 },
-    ]
+    attendanceData: attendanceData.length > 0 ? attendanceData : [{ month: 'Current', percentage: 0 }]
   };
 }
 
 export async function getStudentSchedule(studentId: string): Promise<any[]> {
   const supabase = await createServerSupabaseClient();
   const { data: student } = await supabase.from('students').select('*').eq('id', studentId).single();
-  return [
-    { period: 1, courseName: "Data Structures", className: "CS-A", day: "Monday" },
-    { period: 2, courseName: "Algorithms", className: "CS-A", day: "Monday" },
-    { period: 3, courseName: "Database Systems", className: "CS-A", day: "Monday" }
-  ];
+  if (!student) return [];
+
+  const { data: classList } = await supabase
+      .from('classes')
+      .select('id, courses(name, code), teachers(profiles(full_name))')
+      .eq('program', student.program)
+      .eq('branch', student.branch)
+      .eq('semester', student.current_semester)
+      .eq('section', student.section || 'A');
+
+  if (!classList || classList.length === 0) return [];
+  const classIds = classList.map(c => c.id);
+
+  const { data: timetables } = await supabase
+      .from('timetables')
+      .select('*')
+      .in('class_id', classIds);
+
+  if (!timetables || timetables.length === 0) return [];
+
+  return timetables.map((entry: any) => {
+      const cls: any = classList.find((c: any) => c.id === entry.class_id);
+      let periodVal = 1;
+      if (entry.start_time) {
+          periodVal = parseInt(entry.start_time.split(':')[0], 10);
+      }
+      return {
+          id: entry.id,
+          period: periodVal,
+          courseCode: cls?.courses?.code,
+          courseName: cls?.courses?.name,
+          className: `${student.program} ${student.branch} ${student.section || 'A'}`,
+          day: entry.day_of_week,
+          teacherName: cls?.teachers?.profiles?.full_name || 'Unassigned'
+      };
+  });
 }
 
 export async function getAvailableSections(program: string, year: string | number, courseId: string): Promise<string[]> {
@@ -364,3 +457,4 @@ export async function getStudentProfileForTeacher(studentId: string, teacherId?:
   if (error) return { data: null, error: error.message };
   return { data, error: null };
 }
+

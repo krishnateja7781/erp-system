@@ -106,3 +106,4 @@ export async function deleteNote(noteId: string, userId: string): Promise<Action
   if (error) return { success: false, error: error.message };
   return { success: true, message: 'Note deleted.' };
 }
+

@@ -8,18 +8,29 @@ import { getEmployeeDashboardStats, type EmployeeDashboardData } from '@/actions
 import { Button } from '@/components/ui/button';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, CartesianGrid } from 'recharts';
 
+let dashboardCachePromise: Promise<any> | null = null;
+let lastDashboardFetch = 0;
+
 export default function EmployeeDashboard() {
   const { currentUser } = useAuthProtection('employee');
   const [stats, setStats] = React.useState<EmployeeDashboardData | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
+  const uidRef = React.useRef(currentUser?.uid);
+  React.useEffect(() => { uidRef.current = currentUser?.uid; });
+
   const loadData = React.useCallback(async () => {
-    if (!currentUser?.uid) return;
+    if (!uidRef.current) return;
     setIsLoading(true);
     setError(null);
     try {
-      const data = await getEmployeeDashboardStats(currentUser.uid);
+      const now = Date.now();
+      if (!dashboardCachePromise || now - lastDashboardFetch > 2000) {
+          dashboardCachePromise = getEmployeeDashboardStats(uidRef.current);
+          lastDashboardFetch = now;
+      }
+      const data = await dashboardCachePromise;
       setStats(data);
     } catch (err: any) {
       console.error("Failed to load dashboard data:", err);
@@ -27,11 +38,13 @@ export default function EmployeeDashboard() {
     } finally {
       setIsLoading(false);
     }
-  }, [currentUser?.uid]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // stable — uid doesn't change after login
 
   React.useEffect(() => {
-    loadData();
-  }, [loadData]);
+    if (currentUser?.uid) loadData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.uid]);
 
   if (isLoading) {
     return (
@@ -191,15 +204,85 @@ export default function EmployeeDashboard() {
       )}
 
       {stats.employeeType === 'exam_marks_management' && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <Card className="card-elevated border-l-4 border-l-orange-500">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium">Active Exams</CardTitle>
-                <CalendarCog className="h-4 w-4 text-orange-500" />
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+              <Card className="card-elevated border-l-4 border-l-orange-500">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium">Total Exams</CardTitle>
+                  <CalendarCog className="h-4 w-4 text-orange-500" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{stats.totalExams?.toLocaleString()}</div>
+                  <p className="text-xs text-muted-foreground mt-1 text-orange-600 dark:text-orange-400">All exam records</p>
+                </CardContent>
+              </Card>
+              <Card className="card-elevated border-l-4 border-l-emerald-500">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium">Scheduled</CardTitle>
+                  <FileCheck className="h-4 w-4 text-emerald-500" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{stats.scheduledExams?.toLocaleString() ?? '—'}</div>
+                  <p className="text-xs text-muted-foreground mt-1 text-emerald-600 dark:text-emerald-400">Active exam sessions</p>
+                </CardContent>
+              </Card>
+              <Card className="card-elevated border-l-4 border-l-blue-500">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium">Classes</CardTitle>
+                  <BookOpenCheck className="h-4 w-4 text-blue-500" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{stats.totalClasses?.toLocaleString() ?? '—'}</div>
+                  <p className="text-xs text-muted-foreground mt-1 text-blue-600 dark:text-blue-400">Created sections</p>
+                </CardContent>
+              </Card>
+              <Card className="card-elevated border-l-4 border-l-violet-500">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium">Courses</CardTitle>
+                  <GraduationCap className="h-4 w-4 text-violet-500" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{stats.totalCourses?.toLocaleString() ?? '—'}</div>
+                  <p className="text-xs text-muted-foreground mt-1 text-violet-600 dark:text-violet-400">Registered courses</p>
+                </CardContent>
+              </Card>
+              <Card className="card-elevated border-l-4 border-l-amber-500">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium">Marks Entered</CardTitle>
+                  <Bookmark className="h-4 w-4 text-amber-500" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{stats.marksEntered?.toLocaleString() ?? '—'}</div>
+                  <p className="text-xs text-muted-foreground mt-1 text-amber-600 dark:text-amber-400">Student mark records</p>
+                </CardContent>
+              </Card>
+            </div>
+            <Card className="card-elevated">
+              <CardHeader>
+                <CardTitle>Exam &amp; Marks Management Portal</CardTitle>
+                <CardDescription>Navigate to the modules below to manage your academic examination workflow.</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{stats.totalExams?.toLocaleString()}</div>
-                <p className="text-xs text-muted-foreground mt-1 text-orange-600 dark:text-orange-400">Schedules maintained</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
+                  {[
+                    { label: 'Dashboard', href: '/employee/exams/dashboard', color: 'from-orange-500 to-red-600', icon: CalendarCog },
+                    { label: 'Courses', href: '/employee/exams/courses', color: 'from-blue-500 to-sky-600', icon: BookOpenCheck },
+                    { label: 'Classes', href: '/employee/exams/classes', color: 'from-cyan-500 to-teal-600', icon: GraduationCap },
+                    { label: 'Exams', href: '/employee/exams/schedule', color: 'from-orange-500 to-amber-600', icon: CalendarCog },
+                    { label: 'Marks', href: '/employee/exams/marks', color: 'from-amber-500 to-orange-600', icon: FileCheck },
+                    { label: 'Timetables', href: '/employee/exams/timetables', color: 'from-teal-500 to-emerald-600', icon: CalendarCog },
+                  ].map(item => {
+                    const Icon = item.icon;
+                    return (
+                      <a key={item.label} href={item.href} className="flex flex-col items-center gap-2 p-4 rounded-xl border border-border/50 hover:border-primary/30 hover:bg-muted/30 transition-all duration-200 group text-center">
+                        <div className={`flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br ${item.color} text-white shadow-md group-hover:scale-110 transition-transform duration-200`}>
+                          <Icon className="h-6 w-6" />
+                        </div>
+                        <span className="text-xs font-medium text-muted-foreground group-hover:text-foreground transition-colors">{item.label}</span>
+                      </a>
+                    );
+                  })}
+                </div>
               </CardContent>
             </Card>
           </div>

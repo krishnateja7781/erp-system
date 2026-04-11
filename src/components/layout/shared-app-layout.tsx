@@ -6,42 +6,21 @@ import { AppLayout } from "@/components/layout/app-layout";
 import { Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import type { AppUser } from '@/hooks/useAuthProtection';
+import { useAuthProtection } from '@/hooks/useAuthProtection';
 
 /**
  * Shared layout wrapper for pages that sit outside role-specific folders
  * (e.g. /classrooms, /notifications, /settings).
- * Reads the logged-in user and wraps children in AppLayout with the correct role sidebar.
+ * Reads the logged-in user from the live Supabase session and wraps children
+ * in AppLayout with the correct role sidebar.
  */
 export function SharedAppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const [currentUser, setCurrentUser] = React.useState<AppUser | null>(null);
-  const [isLoading, setIsLoading] = React.useState(true);
 
-  React.useEffect(() => {
-    const userStr = localStorage.getItem('loggedInUser');
-    if (userStr) {
-      try {
-        const parsed = JSON.parse(userStr);
-        setCurrentUser(parsed);
-      } catch {
-        router.push('/login');
-      }
-    } else {
-      router.push('/login');
-    }
-    setIsLoading(false);
-  }, [router]);
+  // No role restriction — any authenticated user may access shared pages
+  const { currentUser, authIsLoading, layoutError, handleLogout } = useAuthProtection();
 
-  const handleLogout = React.useCallback(async () => {
-    try {
-      await fetch('/api/auth/logout', { method: 'POST' });
-    } catch { /* ignore */ }
-    localStorage.removeItem('loggedInUser');
-    router.push('/login');
-  }, [router]);
-
-  if (isLoading) {
+  if (authIsLoading) {
     return (
       <div className="flex h-screen w-full items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -50,7 +29,7 @@ export function SharedAppLayout({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!currentUser) {
+  if (layoutError || !currentUser) {
     return (
       <div className="flex h-screen w-full items-center justify-center text-center p-4">
         <div>

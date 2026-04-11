@@ -41,7 +41,10 @@ const collectionMap: Record<string, string> = {
 };
 
 // Tables that may not exist yet – silently return [] instead of logging errors
-const optionalCollections = new Set(['loginActivities', 'notifications', 'login_activities']);
+const optionalCollections = new Set([
+  'loginActivities', 'notifications', 'login_activities',
+  'classrooms', 'classroom_posts', 'classroom_assignments', 'classroom_submissions',
+]);
 
 function getTable(collection: string): string {
   return collectionMap[collection] || collection;

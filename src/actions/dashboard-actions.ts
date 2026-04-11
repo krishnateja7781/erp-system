@@ -2,7 +2,7 @@
 'use server';
 
 import { readCollection, findOneWhere, findWhere } from '@/lib/db';
-import { createServerSupabaseClient } from '@/lib/supabase';
+import { createServiceRoleClient as createServerSupabaseClient } from '@/lib/supabase';
 import type { Teacher, Student, FullStudentData } from '@/lib/types';
 import { PERIOD_SLOTS } from '@/lib/utils';
 import { getStudentSchedule } from './student-actions';
@@ -31,40 +31,109 @@ const calculateCGPA = (allMarksData: { grade: string | null; credits: number | n
 export async function getStudentProfileDetails(studentDocId: string): Promise<FullStudentData | null> {
     if (!studentDocId) return null;
     try {
-        const studentData = await findOneWhere<any>('students', (s) => s.id === studentDocId);
-        if (!studentData) return null;
-        const studentUid = studentData.user_uid || studentData.id;
+        const supabase = await createServerSupabaseClient();
+        
+        let { data: studentData, error: studentError } = await supabase
+            .from('students')
+            .select('*, profiles(full_name, email, phone, profile_picture_url)')
+            .eq('id', studentDocId)
+            .maybeSingle();
+            
+        if (!studentData) {
+            // Fallback: If caller passed the auth profile_id instead of students.id
+            const fallback = await supabase
+                .from('students')
+                .select('*, profiles(full_name, email, phone, profile_picture_url)')
+                .eq('profile_id', studentDocId)
+                .maybeSingle();
+            studentData = fallback.data;
+            studentError = fallback.error;
+            if (studentData) {
+                studentDocId = studentData.id; // Correct downstream ID for attendance, marks, etc.
+            }
+        }
+            
+        if (studentError || !studentData) return null;
 
-        const attendanceRecs = await findWhere<any>('attendance', (a) => a.studentId === studentDocId);
-        const attendance: any = { overallPercentage: null, recentAbsences: null };
-        if (attendanceRecs.length > 0) {
+        // Map it back to the expected Student interface format
+        const profileInfo = {
+            ...studentData,
+            name: studentData.profiles?.full_name || 'Unknown',
+            email: studentData.profiles?.email || '',
+            phone: studentData.profiles?.phone || '',
+            avatarUrl: studentData.profiles?.profile_picture_url || '',
+            collegeId: studentData.college_id,
+            year: studentData.current_year,
+            semester: studentData.current_semester,
+            isHosteler: studentData.is_hosteler,
+            type: studentData.student_type || (studentData.is_hosteler ? 'Hosteler' : 'Day Scholar'),
+        };
+
+        // 2. Attendance
+        const { data: attendanceRecs } = await supabase
+            .from('attendance')
+            .select('status')
+            .eq('student_id', studentDocId);
+            
+        const attendance: any = { overallPercentage: 100, recentAbsences: null };
+        if (attendanceRecs && attendanceRecs.length > 0) {
             const totalClasses = attendanceRecs.length;
             const presentClasses = attendanceRecs.filter((a: any) => a.status === 'Present').length;
             attendance.overallPercentage = totalClasses > 0 ? Math.round((presentClasses / totalClasses) * 100) : 100;
         }
 
-        const marksRecs = await findWhere<any>('marks', (m) => m.studentId === studentDocId);
-        const classMap = new Map<string, any>();
-        (await readCollection<any>('classes')).forEach((c: any) => classMap.set(c.id, c));
-        const courseMap = new Map<string, any>();
-        (await readCollection<any>('courses')).forEach((c: any) => { courseMap.set(c.id, c); courseMap.set(c.courseId, c); });
+        // 3. Marks & CGPA
+        const { data: marksRecs } = await supabase
+            .from('marks')
+            .select('grade, classes(courses(credits, title))')
+            .eq('student_id', studentDocId);
 
-        const allMarksData = marksRecs.map((markData: any) => {
-            const classData = classMap.get(markData.classId);
-            const courseData = classData ? (courseMap.get(classData.courseId) || courseMap.get(classData.id)) : null;
-            return { grade: markData.grade || null, credits: courseData?.credits || null };
-        });
+        let allMarksData: any[] = [];
+        if (marksRecs && marksRecs.length > 0) {
+            allMarksData = marksRecs.map((m: any) => ({
+                grade: m.grade || null,
+                credits: m.classes?.courses?.credits || null,
+                courseTitle: m.classes?.courses?.title || 'Unknown Course'
+            }));
+        }
 
-        const marks: any = { cgpa: calculateCGPA(allMarksData), recentGrades: allMarksData.slice(-5).filter((m: any) => m.grade).map((m: any) => ({ course: 'Course', grade: m.grade! })) };
+        const marks: any = { 
+            cgpa: calculateCGPA(allMarksData), 
+            recentGrades: allMarksData.slice(-5).filter((m: any) => m.grade).map((m: any) => ({ course: m.courseTitle, grade: m.grade! })) 
+        };
 
-        const feeRec = await findOneWhere<any>('fees', (f) => f.id === studentDocId);
-        const fees = feeRec ? { balance: feeRec.balance, status: feeRec.balance <= 0 ? 'Paid' : 'Pending' } : { balance: 0, status: 'N/A' };
+        // 4. Fees
+        const { data: feeRecs } = await supabase
+            .from('fees')
+            .select('balance')
+            .eq('student_id', studentDocId);
+            
+        const totalBalance = feeRecs?.reduce((sum, f) => sum + (f.balance || 0), 0) || 0;
+        const fees = { balance: totalBalance, status: totalBalance <= 0 ? 'Paid' : 'Pending' };
 
-        const hostelInfo = studentData.hostelId ? { hostelName: 'Hostel', roomNumber: studentData.roomNumber || null } : null;
-        const enrolledClasses = await findWhere<any>('classes', (c) => (c.studentUids || []).includes(studentUid));
-        const coursesEnrolled = enrolledClasses.map((c: any) => c.courseName || c.courseId);
+        // 5. Hostel
+        const { data: hostelData } = await supabase
+            .from('hostel_allocations')
+            .select('hostel_rooms(room_number, hostels(name))')
+            .eq('student_id', studentDocId)
+            .eq('status', 'Active')
+            .single();
+            
+        const hostelRoomsData: any = hostelData?.hostel_rooms;
+        const hostelInfo = hostelRoomsData ? { 
+            hostelName: hostelRoomsData.hostels?.name || (Array.isArray(hostelRoomsData.hostels) ? hostelRoomsData.hostels[0]?.name : 'Hostel'), 
+            roomNumber: hostelRoomsData.room_number || null 
+        } : null;
 
-        return { profile: studentData as Student, attendance, marks, fees, hostelInfo, coursesEnrolled };
+        // 6. Courses Enrolled
+        const { data: enrolledClasses } = await supabase
+            .from('enrollments')
+            .select('classes(courses(title))')
+            .eq('student_id', studentDocId);
+            
+        const coursesEnrolled = enrolledClasses?.map((c: any) => c.classes?.courses?.title || 'Unknown Course') || [];
+
+        return { profile: profileInfo as any, attendance, marks, fees, hostelInfo, coursesEnrolled };
     } catch (error) {
         console.error('Error in getStudentProfileDetails:', error);
         return null;
@@ -292,7 +361,7 @@ export async function getTeacherProfileDetails(teacherUid: string, extraIds?: { 
         // Primary lookup: teacher whose profile_id matches the logged-in user's auth UID
         let { data: teacherData, error } = await supabase
             .from('teachers')
-            .select('*, profiles(full_name, email)')
+            .select('*, profiles(full_name, email, phone, profile_picture_url)')
             .eq('profile_id', teacherUid)
             .maybeSingle();
 
@@ -300,7 +369,7 @@ export async function getTeacherProfileDetails(teacherUid: string, extraIds?: { 
         if (!teacherData && extraIds?.staffDocId) {
             const { data: byId } = await supabase
                 .from('teachers')
-                .select('*, profiles(full_name, email)')
+                .select('*, profiles(full_name, email, phone, profile_picture_url)')
                 .eq('id', extraIds.staffDocId)
                 .maybeSingle();
             if (byId) teacherData = byId;
@@ -340,7 +409,13 @@ export async function getTeacherProfileDetails(teacherUid: string, extraIds?: { 
             profile: {
                 ...teacherData,
                 // Normalize name so callers can use profile.profile.name
-                name: (teacherData.profiles as any)?.full_name || teacherData.full_name || 'Teacher'
+                name: (teacherData.profiles as any)?.full_name || teacherData.full_name || 'Teacher',
+                email: (teacherData.profiles as any)?.email || teacherData.email || '',
+                phone: (teacherData.profiles as any)?.phone || teacherData.phone || '',
+                avatarUrl: (teacherData.profiles as any)?.profile_picture_url || teacherData.avatar_url || '',
+                staffId: teacherData.staff_id,
+                joinDate: teacherData.join_date || teacherData.created_at?.split('T')[0],
+                officeLocation: teacherData.office_location,
             },
             coursesAssigned,
             studentsCount: studentsCount || 0,
@@ -397,6 +472,10 @@ export interface EmployeeDashboardData {
     totalHostelStudents?: number;
     // Exam Management
     totalExams?: number;
+    scheduledExams?: number;
+    totalClasses?: number;
+    totalCourses?: number;
+    marksEntered?: number;
     // Library Management
     totalBooks?: number;
     availableBooks?: number;
@@ -439,8 +518,17 @@ export async function getEmployeeDashboardStats(profileId: string): Promise<Empl
          result.availableRooms = totalBeds - occupiedBeds;
          result.totalHostelStudents = students || occupiedBeds;
     } else if (employeeType === 'exam_marks_management') {
-         const { count: scheduleCount } = await supabase.from('exam_schedule').select('*', { count: 'exact', head: true });
-         result.totalExams = scheduleCount || 0;
+         const [examsRes, classesRes, coursesRes, marksRes] = await Promise.all([
+             supabase.from('exams').select('id, status', { count: 'exact' }),
+             supabase.from('classes').select('*', { count: 'exact', head: true }),
+             supabase.from('courses').select('*', { count: 'exact', head: true }),
+             supabase.from('exam_marks').select('*', { count: 'exact', head: true }),
+         ]);
+         result.totalExams = (examsRes.data?.length) || 0;
+         result.scheduledExams = examsRes.data?.filter((e: any) => e.status === 'Scheduled').length || 0;
+         result.totalClasses = classesRes.count || 0;
+         result.totalCourses = coursesRes.count || 0;
+         result.marksEntered = marksRes.count || 0;
     } else if (employeeType === 'library_management') {
          const { data: books } = await supabase.from('books').select('total_copies, available_copies');
          let total = 0; let available = 0;
@@ -455,3 +543,4 @@ export async function getEmployeeDashboardStats(profileId: string): Promise<Empl
 
     return result;
 }
+

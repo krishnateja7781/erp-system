@@ -4,6 +4,7 @@ import { createServerSupabaseClient, createServiceRoleClient } from '@/lib/supab
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { Profile } from '@/lib/types'
+import { createStudentAccount } from './student-actions'
 
 export async function signInAction(formData: FormData) {
   const email = formData.get('email') as string
@@ -50,14 +51,59 @@ export async function getSession() {
     return { data: null, error: `DB Error: ${profileDbError?.message || 'No rows returned for profile.'}. UserID: ${user.id}` }
   }
     
+  let userType = null;
+  if (profile.role === 'student') {
+     const adminSupabase = await createServiceRoleClient();
+     const { data: std } = await adminSupabase.from('students').select('is_hosteler').eq('profile_id', user.id).single();
+     userType = std?.is_hosteler ? 'Hosteler' : 'Day Scholar';
+  } else if (profile.role === 'employee') {
+     const adminSupabase = await createServiceRoleClient();
+     const { data: emp } = await adminSupabase.from('employees').select('employee_type').eq('profile_id', user.id).single();
+     userType = emp?.employee_type || null;
+  }
+    
   return { 
     data: { 
       session: { user },
-      profile: profile as Profile | null
+      profile: profile as Profile | null,
+      userType
     }, 
     error: null 
   }
 }
+
+/** Returns the current user's profile id, name and role from the server session — no localStorage needed. */
+export async function getMyProfile(): Promise<{ uid: string; name: string; role: string } | null> {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error || !user) return null;
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('full_name, role')
+    .eq('id', user.id)
+    .single();
+
+  if (!profile) return null;
+
+  // Fetch real name from the role-specific table for teachers/students
+  let name = profile.full_name || '';
+  if (!name || name.trim() === '') {
+    if (profile.role === 'teacher') {
+      const { data: t } = await supabase.from('teachers').select('name').eq('profile_id', user.id).single();
+      if (t?.name) name = t.name;
+    } else if (profile.role === 'student') {
+      const { data: s } = await supabase.from('students').select('name').eq('profile_id', user.id).single();
+      if (s?.name) name = s.name;
+    } else if (profile.role === 'employee' || profile.role === 'admin') {
+      const { data: e } = await supabase.from('employees').select('name').eq('profile_id', user.id).single();
+      if (e?.name) name = e.name;
+    }
+  }
+
+  return { uid: user.id, name: name || user.email || 'User', role: profile.role };
+}
+
 
 export async function resetPassword(email: string) {
   const supabase = await createServerSupabaseClient()
@@ -149,6 +195,8 @@ export async function adminSelfRegister(data: any) {
 }
 
 export async function studentSelfRegister(data: any): Promise<any> {
-    return { success: true, message: 'Student registered successfully' };
+    const response = await createStudentAccount(data);
+    return response;
 }
+
 

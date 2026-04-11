@@ -22,6 +22,7 @@ type DetailedLogEntry = {
   courseCode: string | null;
   courseName: string | null;
   status: AttendanceStatusType;
+  semester?: string | number;
 };
 
 type CourseSummary = {
@@ -99,32 +100,33 @@ export default function StudentAttendancePage() {
   }, [attendanceSummary, selectedSemester]);
 
   const dayWiseGridData = React.useMemo(() => {
-    const grid = new Map<DayOfWeek, Map<number, { status: AttendanceStatusType; courseName: string | null; courseCode: string | null }>>();
-    daysOfWeek.forEach(day => grid.set(day, new Map()));
+    const grid = new Map<string, Map<number, { status: AttendanceStatusType; courseName: string | null; courseCode: string | null }>>();
 
-    detailedLog.forEach(log => {
+    // Filter detailedLog by selectedSemester
+    const filteredLogs = detailedLog.filter(log => log && log.semester?.toString() === selectedSemester);
+
+    filteredLogs.forEach(log => {
         if (log && log.date && typeof log.period === 'number') {
-            try {
-                const logDate = new Date(log.date);
-                const dayIndex = logDate.getUTCDay(); // Use UTC day to avoid timezone issues
-                if (dayIndex >= 1 && dayIndex <= 5) {
-                    const dayName = daysOfWeek[dayIndex -1];
-                    const dayMap = grid.get(dayName);
-                    if (dayMap && !dayMap.has(log.period)) { 
-                        dayMap.set(log.period, { 
-                            status: log.status, 
-                            courseName: log.courseName, 
-                            courseCode: log.courseCode 
-                        });
-                    }
-                }
-            } catch (e) {
-                 console.warn("Error processing date for day-wise grid:", log.date, e);
+            const dateStr = log.date;
+            if (!grid.has(dateStr)) {
+                grid.set(dateStr, new Map());
             }
+            const dateMap = grid.get(dateStr)!;
+            dateMap.set(log.period, { 
+                status: log.status, 
+                courseName: log.courseName, 
+                courseCode: log.courseCode 
+            });
         }
     });
-    return grid;
-  }, [detailedLog]);
+
+    // Sort dates descending
+    const sortedGrid = new Map(
+      Array.from(grid.entries()).sort((a, b) => new Date(b[0]).getTime() - new Date(a[0]).getTime())
+    );
+
+    return sortedGrid;
+  }, [detailedLog, selectedSemester]);
 
 
     const getCompactStatusBadge = (status: string | null | undefined) => {
@@ -248,28 +250,36 @@ export default function StudentAttendancePage() {
         <TabsContent value="day-wise" className="mt-4">
           <Card className="card-elevated">
             <CardHeader>
-              <CardTitle>Day Wise Log (Semester {currentSemesterData?.semester || '-'})</CardTitle>
-              <CardDescription>Weekly attendance grid for the selected semester. Shows the first recorded status for each slot.</CardDescription>
+              <CardTitle>Daily Log (Semester {currentSemesterData?.semester || '-'})</CardTitle>
+              <CardDescription>Chronological attendance grid for the selected semester.</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
                 <Table className="min-w-[700px] border">
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[100px] text-center border-r">Day</TableHead>
+                      <TableHead className="w-[120px] text-center border-r">Date</TableHead>
                       {periodsArray.map(period => (
                         <TableHead key={period} className="text-center border-r last:border-r-0">{`Period ${period}`}</TableHead>
                       ))}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {daysOfWeek.map(day => (
-                      <TableRow key={day} className="[&_td]:border-r [&_td:last-child]:border-r-0">
-                        <TableCell className="font-semibold text-center align-middle h-20">{day}</TableCell>
+                    {Array.from(dayWiseGridData.keys()).map(dateStr => {
+                      const d = new Date(dateStr);
+                      const formattedDate = d.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
+                      const dayName = d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
+                      
+                      return (
+                      <TableRow key={dateStr} className="[&_td]:border-r [&_td:last-child]:border-r-0 hover:bg-blue-50/20 dark:hover:bg-blue-900/10">
+                        <TableCell className="font-semibold text-center align-middle h-20">
+                            <div>{formattedDate}</div>
+                            <div className="text-xs text-muted-foreground font-normal">{dayName}</div>
+                        </TableCell>
                         {periodsArray.map(period => {
-                          const entry = dayWiseGridData.get(day)?.get(period);
+                          const entry = dayWiseGridData.get(dateStr)?.get(period);
                           return (
-                            <TableCell key={`${day}-${period}`} className="text-center align-top p-1.5 h-20">
+                            <TableCell key={`${dateStr}-${period}`} className="text-center align-top p-1.5 h-20">
                               {entry ? (
                                 <div className="flex flex-col items-center justify-center h-full text-xs space-y-1">
                                   <span className="font-medium block truncate max-w-[100px]">{entry.courseName || entry.courseCode || 'N/A'}</span>
@@ -282,12 +292,12 @@ export default function StudentAttendancePage() {
                           );
                         })}
                       </TableRow>
-                    ))}
+                    )})}
                   </TableBody>
                 </Table>
               </div>
-                {detailedLog.length === 0 && (
-                 <div className="flex flex-col items-center justify-center py-16 text-center"><div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted mb-4"><ListChecks className="h-8 w-8 text-muted-foreground/40" /></div><p className="text-sm font-medium text-muted-foreground">No day-wise attendance log found for this semester.</p></div>
+                {dayWiseGridData.size === 0 && (
+                 <div className="flex flex-col items-center justify-center py-16 text-center"><div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted mb-4"><ListChecks className="h-8 w-8 text-muted-foreground/40" /></div><p className="text-sm font-medium text-muted-foreground">No attendance logs found for this semester.</p></div>
                )}
             </CardContent>
           </Card>

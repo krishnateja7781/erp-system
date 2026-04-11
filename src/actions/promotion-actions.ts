@@ -1,6 +1,6 @@
 'use server';
 
-import { createServerSupabaseClient } from '@/lib/supabase';
+import { createServiceRoleClient as createServerSupabaseClient } from '@/lib/supabase';
 import type { ActionResult } from '@/lib/types';
 import { getSession } from './auth-actions';
 
@@ -66,3 +66,4 @@ export async function promoteStudentsBatch(studentIds: string[], academicYear: s
     
     return { success: true, message: `Successfully promoted ${successCount} out of ${studentIds.length} students.`, details: results };
 }
+

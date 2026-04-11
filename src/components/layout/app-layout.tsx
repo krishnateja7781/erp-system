@@ -3,7 +3,7 @@
 
 import * as React from "react";
 import type { ReactNode } from "react";
-import { Briefcase, Clipboard, GraduationCap, LogOut, Settings, ClipboardCheck, Library, Users, BookOpenCheck, CalendarClock, CalendarCheck, CalendarCog, Sparkles, Banknote, MessageSquare, MessageSquarePlus, FileSignature, Link2, Edit2, PenSquare, Home, ArrowLeft, BookOpen } from "lucide-react";
+import { Briefcase, Clipboard, GraduationCap, LogOut, Settings, ClipboardCheck, Library, Users, BookOpenCheck, CalendarClock, CalendarCheck, CalendarCog, Sparkles, Banknote, MessageSquare, MessageSquarePlus, FileSignature, Link2, Edit2, PenSquare, Home, ArrowLeft, BookOpen, Utensils } from "lucide-react";
 
 import {
   SidebarProvider,
@@ -37,15 +37,16 @@ interface AppLayoutProps {
 const studentNavItems: NavItem[] = [
   { href: "/student/dashboard", label: "Dashboard", icon: "LayoutDashboard" },
   { href: "/student/profile", label: "Profile", icon: "User" },
-  { href: "/classrooms", label: "Classrooms", icon: "BookOpen" },
+  { href: "/student/classrooms", label: "Classrooms", icon: "BookOpen" },
   { href: "/student/attendance", label: "Attendance", icon: "CalendarCheck" },
   { href: "/student/marks", label: "Marks", icon: "BarChart3" },
   { href: "/student/exams", label: "Exams", icon: "ClipboardCheck" },
   { href: "/student/fees", label: "Fees", icon: "IndianRupee" },
   { href: "/student/hostel", label: "Hostel", icon: "Home" },
   { href: "/student/opportunities", label: "Opportunities", icon: "Briefcase" },
-  { href: "/library", label: "Library Catalog", icon: "Library" },
-  { href: "/settings", label: "Settings", icon: "Settings" },
+  { href: "/student/library", label: "Library Catalog", icon: "Library" },
+  { href: "/student/notifications", label: "Notifications", icon: "Bell" },
+  { href: "/student/settings", label: "Settings", icon: "Settings" },
 ];
 
 const adminNavItems: NavItem[] = [
@@ -61,31 +62,43 @@ const adminNavItems: NavItem[] = [
   { href: "/admin/marks", label: "Overall Marks", icon: "Edit", color: "251, 191, 36" },
   { href: "/admin/exams", label: "Exam Schedules", icon: "CalendarCog", color: "251, 146, 60" },
   { href: "/admin/opportunities", label: "Opportunities", icon: "Briefcase", color: "251, 113, 133" },
-  { href: "/library", label: "Library Catalog", icon: "Library", color: "244, 114, 182" },
-  { href: "/settings", label: "Settings", icon: "Settings", color: "248, 113, 113" },
+  { href: "/admin/library", label: "Library Catalog", icon: "Library", color: "244, 114, 182" },
+  { href: "/admin/notifications", label: "Notifications", icon: "Bell", color: "251, 191, 36" },
+  { href: "/admin/settings", label: "Settings", icon: "Settings", color: "248, 113, 113" },
 ];
 
 const teacherNavItems: NavItem[] = [
   { href: "/teacher/dashboard", label: "Dashboard", icon: "LayoutDashboard" },
   { href: "/teacher/profile", label: "My Profile", icon: "User" },
-  { href: "/classrooms", label: "Classrooms", icon: "BookOpen" },
+  { href: "/teacher/classrooms", label: "Classrooms", icon: "BookOpen" },
   { href: "/teacher/students", label: "My Students", icon: "Users" },
   { href: "/teacher/marks", label: "Manage Marks", icon: "Edit" },
   { href: "/teacher/attendance", label: "Class Attendance", icon: "CalendarCheck" },
   { href: "/teacher/exams", label: "Exams", icon: "ClipboardCheck" },
-  { href: "/library", label: "Library Catalog", icon: "Library" },
-  { href: "/teacher/other-tools", label: "Other Tools", icon: "Sparkles", color: "167, 139, 250" },
-  { href: "/settings", label: "Settings", icon: "Settings" },
+  { href: "/teacher/library", label: "Library Catalog", icon: "Library" },
+  { href: "/teacher/notifications", label: "Notifications", icon: "Bell" },
+  { href: "/teacher/settings", label: "Settings", icon: "Settings" },
 ];
 
 const employeeNavItems: NavItem[] = [
   { href: "/employee/dashboard", label: "Dashboard", icon: "LayoutDashboard", multiColor: true },
   { href: "/employee/fees", label: "Fees", icon: "IndianRupee", color: "74, 222, 128" },
   { href: "/employee/hostel", label: "Hostels", icon: "Home", color: "163, 230, 53" },
-  { href: "/employee/users", label: "Users Mgt", icon: "Users", color: "167, 139, 250" },
-  { href: "/employee/exams", label: "Exams & Marks", icon: "ClipboardCheck", color: "251, 146, 60" },
+  { href: "/employee/hostel/fees", label: "Hostel Fees", icon: "IndianRupee", color: "163, 230, 100" },
+  { href: "/employee/hostel/menu", label: "Food Menu", icon: "Utensils", color: "250, 204, 21" },
+  { href: "/employee/users", label: "Manage Staff", icon: "UserCog", color: "167, 139, 250" },
+  { href: "/employee/students", label: "Students", icon: "GraduationCap", color: "96, 165, 250" },
+  { href: "/employee/teachers", label: "Teachers", icon: "UserCheck", color: "251, 146, 60" },
+  // Exam & Marks Management sub-pages
+  { href: "/employee/exams/dashboard", label: "Exam Dashboard", icon: "LayoutDashboard", color: "251, 146, 60" },
+  { href: "/employee/exams/courses", label: "Courses", icon: "BookOpenCheck", color: "96, 165, 250" },
+  { href: "/employee/exams/classes", label: "Classes", icon: "Library", color: "34, 211, 238" },
+  { href: "/employee/exams/schedule", label: "Exam Schedules", icon: "CalendarCog", color: "251, 146, 60" },
+  { href: "/employee/exams/marks", label: "Enter Marks", icon: "Edit", color: "251, 191, 36" },
+  { href: "/employee/exams/timetables", label: "Timetables", icon: "CalendarClock", color: "45, 212, 191" },
   { href: "/employee/library", label: "Library", icon: "Library", color: "34, 211, 238" },
-  { href: "/settings", label: "Settings", icon: "Settings", color: "248, 113, 113" },
+  { href: "/employee/notifications", label: "Notifications", icon: "Bell", color: "251, 191, 36" },
+  { href: "/employee/settings", label: "Settings", icon: "Settings", color: "248, 113, 113" },
 ];
 
 
@@ -114,11 +127,18 @@ function AppLayoutInternal({ children, role, user, onLogout, pageHeaderActions: 
       break;
     case 'employee':
       navItems = employeeNavItems.filter(item => {
-        if (item.href === '/settings' || item.href === '/employee/dashboard') return true;
+        if (item.href === '/employee/settings' || item.href === '/employee/dashboard') return true;
         if (user.type === 'fee_management' && item.href === '/employee/fees') return true;
-        if (user.type === 'hostel_management' && item.href === '/employee/hostel') return true;
-        if (user.type === 'student_staff_management' && item.href === '/employee/users') return true;
-        if (user.type === 'exam_marks_management' && item.href === '/employee/exams') return true;
+        if (user.type === 'hostel_management' && (item.href === '/employee/hostel' || item.href === '/employee/hostel/fees' || item.href === '/employee/hostel/menu')) return true;
+        if (user.type === 'student_staff_management' && (item.href === '/employee/users' || item.href === '/employee/students' || item.href === '/employee/teachers')) return true;
+        if (user.type === 'exam_marks_management' && (
+          item.href === '/employee/exams/dashboard' ||
+          item.href === '/employee/exams/courses' ||
+          item.href === '/employee/exams/classes' ||
+          item.href === '/employee/exams/schedule' ||
+          item.href === '/employee/exams/marks' ||
+          item.href === '/employee/exams/timetables'
+        )) return true;
         if (user.type === 'library_management' && item.href === '/employee/library') return true;
         return false;
       });

@@ -21,6 +21,7 @@ import * as z from 'zod';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { Hostel } from '@/lib/types';
 import { PageHeaderActions } from '@/components/layout/layout-context';
+import { useAuthProtection } from '@/hooks/useAuthProtection';
 
 
 const addHostelSchema = z.object({
@@ -105,6 +106,7 @@ export default function AdminHostelsPage() {
     const [searchTerm, setSearchTerm] = React.useState('');
     const [isAddHostelDialogOpen, setIsAddHostelDialogOpen] = React.useState(false);
     const { toast } = useToast();
+    const { currentUser } = useAuthProtection();
 
     const loadHostels = React.useCallback(async () => {
         setIsLoading(true);
@@ -232,7 +234,7 @@ export default function AdminHostelsPage() {
                                         </TableCell>
                                         <TableCell className="text-center">{getStatusBadge(hostel.status)}</TableCell>
                                         <TableCell className="text-right">
-                                            <Link href={`/admin/hostels/${hostel.id}`} passHref>
+                                            <Link href={`/${currentUser?.role === 'employee' ? 'employee/hostel' : 'admin/hostels'}/${hostel.id}`} passHref>
                                                 <Button variant="outline" size="sm" className="gap-2 bg-gradient-to-r from-lime-600 to-green-600 hover:from-lime-700 hover:to-green-700 text-white shadow-md border-0">
                                                     <Eye className="h-4 w-4" /> View Details
                                                 </Button>

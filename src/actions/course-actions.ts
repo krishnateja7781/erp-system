@@ -1,6 +1,6 @@
 'use server';
 
-import { createServerSupabaseClient } from '@/lib/supabase';
+import { createServiceRoleClient as createServerSupabaseClient } from '@/lib/supabase';
 import { getProgramCode, getBranchCode } from '@/lib/utils';
 import type { ActionResult } from '@/lib/types';
 
@@ -67,6 +67,7 @@ export async function saveCourse(payload: CoursePayload): Promise<ActionResult> 
         if (id) {
             const { error } = await supabase.from('courses').update({ 
               name: courseData.courseName, 
+              title: courseData.courseName,
               credits: courseData.credits 
             }).eq('id', id);
             
@@ -95,6 +96,7 @@ export async function saveCourse(payload: CoursePayload): Promise<ActionResult> 
             const { error: insertErr } = await supabase.from('courses').insert({ 
               code: generatedCourseId, 
               name: courseData.courseName, 
+              title: courseData.courseName,
               program, 
               branch, 
               semester, 
@@ -183,3 +185,4 @@ export async function getUnassignedCoursesForSection(program: string, branch: st
         throw new Error('Failed to fetch unassigned courses.');
     }
 }
+

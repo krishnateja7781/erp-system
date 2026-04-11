@@ -11,7 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Search, Loader2, AlertTriangle, MoreHorizontal, Eye, Edit, Trash2, UserPlus, ShieldPlus, Briefcase } from "lucide-react";
+import { Search, Loader2, AlertTriangle, MoreHorizontal, Eye, Edit, Trash2, UserPlus, ShieldPlus, Briefcase, Users, Mail, Building } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getStaff, deleteTeacher } from '@/actions/staff-actions';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { useToast } from '@/hooks/use-toast';
@@ -71,8 +72,12 @@ export default function AdminStaffListPage() {
     }
   }, []); 
 
+  const effectRan = React.useRef(false);
   React.useEffect(() => {
-    loadStaff();
+    if (!effectRan.current) {
+      loadStaff();
+      effectRan.current = true;
+    }
   }, [loadStaff]); 
 
   const handleAddNew = React.useCallback((mode: "teacher" | "employee" | "super_admin") => {
@@ -295,60 +300,119 @@ export default function AdminStaffListPage() {
 
 // Reusable Table Component for all 3 modes
 function StaffTable({ staff, isLoading, onEdit, onDelete, getStatusBadge, mode }: { staff: StaffMember[], isLoading: boolean, onEdit: (s: StaffMember) => void, onDelete: (id: string, name: string) => void, getStatusBadge: (s: string | null) => any, mode: "teacher" | "employee" | "super_admin" }) {
+  const getBannerColor = () => {
+    switch(mode) {
+      case 'super_admin': return 'from-red-600 via-red-500 to-rose-600';
+      case 'employee': return 'from-purple-600 via-purple-500 to-fuchsia-600';
+      case 'teacher': return 'from-blue-600 via-blue-500 to-cyan-600';
+    }
+  };
+
+  const getCardIcon = () => {
+    switch(mode) {
+      case 'super_admin': return <ShieldPlus className="h-12 w-12 text-muted-foreground/50 mb-3" />;
+      case 'employee': return <Briefcase className="h-12 w-12 text-muted-foreground/50 mb-3" />;
+      case 'teacher': return <Users className="h-12 w-12 text-muted-foreground/50 mb-3" />;
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-muted-foreground w-full">
+        <Loader2 className="h-8 w-8 animate-spin mb-4" />
+        <p>Loading records...</p>
+      </div>
+    );
+  }
+
+  if (staff.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-muted-foreground w-full border-2 border-dashed rounded-xl">
+        {getCardIcon()}
+        <p className="font-medium">No records found.</p>
+        <p className="text-sm">Try adjusting your search or filter criteria.</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="overflow-x-auto">
-      <Table>
-        <TableHeader>
-          <TableRow className="border-border/30">
-            <TableHead>ID</TableHead>
-            <TableHead>Name</TableHead>
-            {mode === 'teacher' && <TableHead>Department</TableHead>}
-            {mode === 'employee' && <TableHead>Type</TableHead>}
-            {mode === 'teacher' && <TableHead>Position</TableHead>}
-            <TableHead>Status</TableHead>
-            <TableHead className="text-right">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {isLoading ? (
-            <TableRow><TableCell colSpan={7} className="text-center py-8"><Loader2 className="inline mr-2 h-5 w-5 animate-spin text-muted-foreground"/>Loading data...</TableCell></TableRow>
-          ) : staff.length > 0 ? staff.map((s) => (
-            <TableRow key={s.id} className="hover:bg-indigo-50/50 dark:hover:bg-indigo-950/20 border-border/20">
-              <TableCell className="font-medium">{s.staffId}</TableCell>
-              <TableCell>{s.name}</TableCell>
-              {mode === 'teacher' && <TableCell>{s.department}</TableCell>}
-              {mode === 'employee' && <TableCell>{employeeTypeLabels[s.department || ""] || s.department || "Employee"}</TableCell>}
-              {mode === 'teacher' && <TableCell>{s.position}</TableCell>}
-              <TableCell>{getStatusBadge(s.status || null)}</TableCell>
-              <TableCell className="text-right">
-                <AlertDialog>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="h-4 w-4"/></Button></DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => onEdit(s)}><Edit className="mr-2 h-4 w-4"/> Edit Profile</DropdownMenuItem>
-                      <AlertDialogTrigger asChild><DropdownMenuItem className="text-destructive" onSelect={(e) => e.preventDefault()}><Trash2 className="mr-2 h-4 w-4"/> Delete</DropdownMenuItem></AlertDialogTrigger>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                          <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                              This action cannot be undone. This will permanently delete the profile for <span className="font-semibold">{s.name} ({s.staffId})</span> and all associated data.
-                          </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction className="bg-destructive hover:bg-destructive/90" onClick={() => onDelete(s.id, s.name || '')}>Delete</AlertDialogAction>
-                      </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </TableCell>
-            </TableRow>
-          )) : (
-            <TableRow><TableCell colSpan={7} className="text-center py-12"><div className="flex flex-col items-center gap-2"><div className="rounded-2xl bg-muted p-3"><Search className="h-5 w-5 text-muted-foreground" /></div><p className="font-medium text-muted-foreground">No records found</p><p className="text-sm text-muted-foreground">Try adjusting your search or filter criteria.</p></div></TableCell></TableRow>
-          )}
-        </TableBody>
-      </Table>
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pt-2">
+      {staff.map(s => (
+        <Card key={s.id} className="flex flex-col overflow-hidden hover:shadow-xl hover:-translate-y-1 transition-all duration-300 card-elevated group relative bg-card/60 backdrop-blur-sm border-border/50">
+          <div className={`h-24 bg-gradient-to-br ${getBannerColor()} relative overflow-hidden`}>
+            <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <div className="absolute -bottom-10 -right-10 w-32 h-32 bg-white/10 rounded-full blur-2xl" />
+          </div>
+          <div className="px-5 pt-0 pb-5 flex-1 flex flex-col">
+            <div className="-mt-12 mb-3 flex justify-between items-end relative z-10">
+               <Avatar className="h-20 w-20 border-4 border-background shadow-md bg-muted">
+                 <AvatarImage src={(s as any).avatarUrl} />
+                 <AvatarFallback className="text-xl font-bold">{s.name?.substring(0,2).toUpperCase()}</AvatarFallback>
+               </Avatar>
+               <div className="shadow-sm">{getStatusBadge(s.status || null)}</div>
+            </div>
+            <h3 className="font-bold text-lg leading-tight truncate group-hover:text-primary transition-colors" title={s.name}>{s.name}</h3>
+            <p className="text-sm font-mono text-muted-foreground mb-4">{s.staffId}</p>
+            
+            <div className="space-y-2 text-sm mt-1 mb-5 flex-1 text-muted-foreground">
+               {mode === 'teacher' && (
+                 <div className="flex items-center gap-2.5 min-w-0" title={s.department || 'Not assigned'}>
+                   <Building className={`h-4 w-4 flex-shrink-0 ${mode === 'teacher' ? 'text-blue-500/70' : 'text-primary/70'}`} />
+                   <span className="truncate">{s.department || 'Not assigned'}</span>
+                 </div>
+               )}
+               {mode === 'employee' && (
+                 <div className="flex items-center gap-2.5 min-w-0" title={employeeTypeLabels[s.department || ""] || s.department || "Employee"}>
+                   <Briefcase className="h-4 w-4 text-purple-500/70 flex-shrink-0" />
+                   <span className="truncate">{employeeTypeLabels[s.department || ""] || s.department || "Employee"}</span>
+                 </div>
+               )}
+               <div className="flex items-center gap-2.5 min-w-0" title={s.position || 'Staff'}>
+                 <Briefcase className={`h-4 w-4 flex-shrink-0 ${mode === 'super_admin' ? 'text-red-500/70' : mode === 'teacher' ? 'text-blue-500/70' : 'text-purple-500/70'}`} />
+                 <span className="truncate flex-1">{s.position || 'Staff'}</span>
+               </div>
+               <div className="flex items-center gap-2.5 min-w-0" title={s.email || 'No email'}>
+                 <Mail className={`h-4 w-4 flex-shrink-0 ${mode === 'super_admin' ? 'text-red-500/70' : mode === 'teacher' ? 'text-blue-500/70' : 'text-purple-500/70'}`} />
+                 <span className="truncate flex-1 text-xs">{s.email || 'No email on file'}</span>
+               </div>
+            </div>
+            
+            <div className="flex items-center gap-2 mt-auto pt-4 border-t border-border/50">
+               <AlertDialog>
+                 <AlertDialogTrigger asChild>
+                   <Button variant="outline" size="icon" className="h-9 w-9 text-destructive border-destructive/20 hover:bg-destructive/10 hover:border-destructive/30 flex-shrink-0" title="Delete Profile">
+                     <Trash2 className="h-4 w-4" />
+                   </Button>
+                 </AlertDialogTrigger>
+                 <AlertDialogContent>
+                   <AlertDialogHeader>
+                     <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                     <AlertDialogDescription>
+                       This will permanently delete the profile for <span className="font-semibold">{s.name} ({s.staffId})</span> and all associated data.
+                     </AlertDialogDescription>
+                   </AlertDialogHeader>
+                   <AlertDialogFooter>
+                     <AlertDialogCancel>Cancel</AlertDialogCancel>
+                     <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => onDelete(s.id, s.name || '')}>Delete</AlertDialogAction>
+                   </AlertDialogFooter>
+                 </AlertDialogContent>
+               </AlertDialog>
+               
+               <Button 
+                 className={`w-full gap-2 variant-secondary 
+                    ${mode === 'super_admin' ? 'bg-red-50/50 hover:bg-red-100 text-red-700 border border-red-200 dark:bg-red-950/30 dark:hover:bg-red-900/50 dark:text-red-300 dark:border-red-800' : 
+                      mode === 'teacher' ? 'bg-blue-50/50 hover:bg-blue-100 text-blue-700 border border-blue-200 dark:bg-blue-950/30 dark:hover:bg-blue-900/50 dark:text-blue-300 dark:border-blue-800' : 
+                      'bg-purple-50/50 hover:bg-purple-100 text-purple-700 border border-purple-200 dark:bg-purple-950/30 dark:hover:bg-purple-900/50 dark:text-purple-300 dark:border-purple-800'
+                    }`}
+                 variant="secondary"
+                 onClick={() => onEdit(s)}
+               >
+                 <Edit className="h-4 w-4" /> Edit Profile
+               </Button>
+            </div>
+          </div>
+        </Card>
+      ))}
     </div>
   );
 }

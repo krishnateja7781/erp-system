@@ -79,16 +79,23 @@ export function StreamTab({ classroomId, userId, userName, userRole }: StreamTab
           event: 'INSERT',
           schema: 'public',
           table: 'classroom_posts',
-          filter: `classroomId=eq.${classroomId}`,
+          filter: `classroom_id=eq.${classroomId}`,
         },
         (payload) => {
-          const newPost = payload.new as ClassroomPost;
+          const row = payload.new as any;
+          const newPost: ClassroomPost = {
+            id: row.id,
+            classroomId: row.classroom_id,
+            authorId: row.author_id,
+            authorName: row.author_name,
+            authorRole: row.author_role || 'student',
+            content: row.content,
+            createdAt: row.created_at,
+          };
           setPosts((prev) => {
-            // Remove any optimistic version with temp ID, then add real post
             const withoutOptimistic = prev.filter(
               (p) => !(p.id.startsWith('opt_') && p.authorId === newPost.authorId && p.content === newPost.content)
             );
-            // Avoid duplicates
             if (withoutOptimistic.some((p) => p.id === newPost.id)) return withoutOptimistic;
             return [newPost, ...withoutOptimistic];
           });
@@ -100,7 +107,7 @@ export function StreamTab({ classroomId, userId, userName, userRole }: StreamTab
           event: 'DELETE',
           schema: 'public',
           table: 'classroom_posts',
-          filter: `classroomId=eq.${classroomId}`,
+          filter: `classroom_id=eq.${classroomId}`,
         },
         (payload) => {
           const deletedId = (payload.old as any).id;
@@ -116,29 +123,37 @@ export function StreamTab({ classroomId, userId, userName, userRole }: StreamTab
     };
   }, [classroomId]);
 
-  // Polling fallback — uses direct Supabase client reads (not server actions)
-  // to avoid overwhelming the Next.js server.
+  // Polling fallback — direct Supabase client reads using snake_case columns
   React.useEffect(() => {
     const interval = setInterval(async () => {
       try {
         const { data: freshPosts } = await supabase
           .from('classroom_posts')
           .select('*')
-          .eq('classroomId', classroomId)
-          .order('createdAt', { ascending: false });
+          .eq('classroom_id', classroomId)
+          .order('created_at', { ascending: false });
         if (!freshPosts) return;
+        const mapped: ClassroomPost[] = freshPosts.map((row: any) => ({
+          id: row.id,
+          classroomId: row.classroom_id,
+          authorId: row.author_id,
+          authorName: row.author_name,
+          authorRole: row.author_role || 'student',
+          content: row.content,
+          createdAt: row.created_at,
+        }));
         setPosts((prev) => {
           const optimistic = prev.filter((p) => p.id.startsWith('opt_'));
           const prevRealIds = new Set(prev.filter((p) => !p.id.startsWith('opt_')).map((p) => p.id));
-          const freshIds = new Set(freshPosts.map((p: any) => p.id));
+          const freshIds = new Set(mapped.map((p) => p.id));
           const sameSet =
             prevRealIds.size === freshIds.size &&
             [...prevRealIds].every((id) => freshIds.has(id));
           if (sameSet) return prev;
           const remainingOptimistic = optimistic.filter(
-            (op) => !freshPosts.some((fp: any) => fp.authorId === op.authorId && fp.content === op.content)
+            (op) => !mapped.some((fp) => fp.authorId === op.authorId && fp.content === op.content)
           );
-          return [...remainingOptimistic, ...(freshPosts as ClassroomPost[])];
+          return [...remainingOptimistic, ...mapped];
         });
       } catch {
         // Silently ignore polling errors

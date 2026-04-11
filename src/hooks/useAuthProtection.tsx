@@ -24,6 +24,10 @@ export interface AppUser {
   type?: string | null;
 }
 
+// Global cache to prevent multiple parallel or redundant server action POSTs across components
+let cachedSessionPromise: Promise<any> | null = null;
+let lastSessionFetchTime = 0;
+
 export function useAuthProtection(expectedRoles?: string | string[]) {
   const [currentUser, setCurrentUser] = React.useState<AppUser | null>(null);
   const [authIsLoading, setAuthIsLoading] = React.useState(true);
@@ -41,12 +45,21 @@ export function useAuthProtection(expectedRoles?: string | string[]) {
     }
   }, [toast]);
 
+  const rolesKey = React.useMemo(() => JSON.stringify(expectedRoles), [expectedRoles]);
+
   React.useEffect(() => {
     let mounted = true;
     
     async function checkAuth() {
       try {
-        const { data, error } = await getSession();
+        const now = Date.now();
+        // Deduplicate the requests - only fetch if there isn't a fresh fetch within the last 5 seconds
+        if (!cachedSessionPromise || now - lastSessionFetchTime > 5000) {
+           cachedSessionPromise = getSession();
+           lastSessionFetchTime = now;
+        }
+        
+        const { data, error } = await cachedSessionPromise;
         
         if (error || !data?.session || !data?.profile) {
             if (mounted) {
@@ -81,6 +94,7 @@ export function useAuthProtection(expectedRoles?: string | string[]) {
           role: role as any,
           avatarUrl: profile.avatar_url || undefined,
           id: profile.id,
+          type: (data as any).userType || null,
         };
 
         if (mounted) {
@@ -100,7 +114,7 @@ export function useAuthProtection(expectedRoles?: string | string[]) {
     checkAuth();
     
     return () => { mounted = false; };
-  }, [expectedRoles, router]);
+  }, [rolesKey, router]);
 
   return {
     currentUser,

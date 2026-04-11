@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar, Clock, BookOpen, GraduationCap, ChevronRight } from "lucide-react";
 import { getTeacherExams } from "@/actions/exam-actions";
+import { getMyTeacherId } from "@/actions/teacher-actions";
 import type { ExamSchedule } from "@/lib/types";
 import { useToast } from "@/hooks/use-toast";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
@@ -19,8 +20,11 @@ export default function TeacherExamsPage() {
     const [isLoading, setIsLoading] = React.useState(true);
 
     React.useEffect(() => {
-        const user = JSON.parse(localStorage.getItem('loggedInUser') || '{}');
-        if (user.uid) setTeacherId(user.uid);
+        async function fetchId() {
+            const id = await getMyTeacherId();
+            if (id) setTeacherId(id);
+        }
+        fetchId();
     }, []);
 
     React.useEffect(() => {

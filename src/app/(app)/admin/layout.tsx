@@ -8,6 +8,8 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { useAuthProtection } from '@/hooks/useAuthProtection';
 
+const ALLOWED_ROLES = ['super_admin', 'employee'];
+
 export default function AdminLayout({
   children,
 }: {
@@ -23,7 +25,7 @@ export default function AdminLayout({
     userEmail,
     handleLogout,
     handleSendVerificationEmail
-  } = useAuthProtection('super_admin');
+  } = useAuthProtection(ALLOWED_ROLES);
 
   if (authIsLoading) {
     return (

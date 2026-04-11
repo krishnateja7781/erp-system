@@ -1,6 +1,6 @@
 'use server';
 
-import { createServerSupabaseClient } from '@/lib/supabase';
+import { createServiceRoleClient as createServerSupabaseClient } from '@/lib/supabase';
 import type { ActionResult } from '@/lib/types';
 
 export interface FeeRecord {
@@ -131,3 +131,4 @@ export interface Transaction {
     category: string;
     status?: 'Success' | 'Failed' | 'Pending Confirmation';
 }
+

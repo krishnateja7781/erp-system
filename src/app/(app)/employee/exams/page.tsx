@@ -1,5 +1,5 @@
-import AdminExamsPage from '@/app/(app)/admin/exams/page';
+import { redirect } from 'next/navigation';
 
-export default function EmployeeExamsPage() {
-    return <AdminExamsPage />;
+export default function EmployeeExamsIndexPage() {
+    redirect('/employee/exams/dashboard');
 }

@@ -1,6 +1,6 @@
 'use server';
 
-import { createServerSupabaseClient } from '@/lib/supabase';
+import { createServiceRoleClient as createServerSupabaseClient } from '@/lib/supabase';
 import type { Book, ActionResult } from '@/lib/types';
 import { revalidatePath } from 'next/cache';
 
@@ -167,3 +167,4 @@ export async function importGoogleBook(googleBookData: GoogleBookVolume): Promis
   revalidatePath('/library');
   return { success: true, message: 'Book imported from Google Books successfully.' };
 }
+

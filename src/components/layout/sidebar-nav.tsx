@@ -52,6 +52,10 @@ const iconMap: IconMap = {
   Link2: Icons.Link2,
   Edit2: Icons.Edit2,
   PenSquare: Icons.PenSquare,
+  GraduationCap: Icons.GraduationCap,
+  UserCheck: Icons.UserCheck,
+  Bell: Icons.Bell,
+  Utensils: Icons.Utensils,
 };
 
 

@@ -108,7 +108,7 @@ export default function TeacherProfilePage() {
                         <CardDescription className="text-lg">{profile?.staffId}</CardDescription>
                         <div className="flex items-center gap-2 mt-1 justify-center md:justify-start text-muted-foreground">
                             {profile?.program === 'General Administration' ? <Building className="h-4 w-4" /> : <GraduationCap className="h-4 w-4" />}
-                            <span>{profile?.program} - {profile?.department}</span>
+                            <span>{profile?.program ? `${profile.program} - ` : ''}{profile?.department}</span>
                         </div>
                         <div className="flex items-center gap-2 mt-1 justify-center md:justify-start text-muted-foreground">
                             <Briefcase className="h-4 w-4" /> <span>{profile?.position}</span>

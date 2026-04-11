@@ -1,6 +1,6 @@
 'use server';
 
-import { createServerSupabaseClient } from '@/lib/supabase';
+import { createServiceRoleClient as createServerSupabaseClient } from '@/lib/supabase';
 import type { Class, ActionResult } from '@/lib/types';
 
 interface ClassPayload { program: string; branch: string; year: string | number; semester: number; courseId: string; section: string; teacherId: string; }
@@ -25,6 +25,19 @@ export async function createClass(payload: ClassPayload): Promise<ActionResult> 
                if (tData2 && tData2.length > 0) targetTeacherId = tData2[0].id;
              }
         }
+        
+        // Fetch or create a default academic term to satisfy the foreign key non-null constraint
+        const { data: termData } = await supabase.from('academic_terms').select('id').limit(1);
+        let defaultTermId = termData?.[0]?.id;
+        if (!defaultTermId) {
+            const { data: newTerm } = await supabase.from('academic_terms').insert({
+                name: 'Default Term',
+                code: 'DT-' + new Date().getFullYear(),
+                start_date: new Date().toISOString().split('T')[0],
+                end_date: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0]
+            }).select('id').single();
+            defaultTermId = newTerm?.id;
+        }
 
         const { data: existing } = await supabase.from('classes')
             .select('id')
@@ -39,8 +52,12 @@ export async function createClass(payload: ClassPayload): Promise<ActionResult> 
 
         const { error } = await supabase.from('classes').insert({
             course_id: targetCourseId,
+            academic_term_id: defaultTermId,
             teacher_id: targetTeacherId || null,
             section,
+            program: payload.program,
+            branch: payload.branch,
+            year: parseInt(year.toString(), 10),
             academic_year: year.toString(),
             semester
         });
@@ -135,3 +152,4 @@ export async function deleteClass(classId: string): Promise<ActionResult> {
         return { success: false, error: 'Failed to delete class.' };
     }
 }
+

@@ -1,6 +1,6 @@
 'use server';
 
-import { createServerSupabaseClient } from '@/lib/supabase';
+import { createServiceRoleClient as createServerSupabaseClient } from '@/lib/supabase';
 import type { ActionResult } from '@/lib/types';
 
 export interface AdminMarksRecord {
@@ -140,9 +140,52 @@ export interface MarksRecord {
     grade: string | null;
 }
 
+export async function getClassIdForSection(program: string, branch: string, semester: number, section: string, courseId: string): Promise<string | null> {
+    const supabase = await createServerSupabaseClient();
+    
+    let queryCourseId = courseId;
+    if (!courseId.includes('-')) {
+        const { data: c } = await supabase.from('courses').select('id').eq('code', courseId).single();
+        if (c) queryCourseId = c.id;
+    }
+
+    const { data } = await supabase.from('classes')
+        .select('id')
+        .eq('program', program)
+        .eq('branch', branch)
+        .eq('semester', semester)
+        .eq('section', section)
+        .eq('course_id', queryCourseId)
+        .single();
+        
+    return data?.id || null;
+}
+
+export async function getMarksForSection(program: string, branch: string, semester: number, section: string, courseId: string) {
+    const supabase = await createServerSupabaseClient();
+    
+    // Resolve course_id UUID if a course code was passed
+    let queryCourseId = courseId;
+    if (!courseId.includes('-')) {
+        const { data: c } = await supabase.from('courses').select('id').eq('code', courseId).single();
+        if (c) queryCourseId = c.id;
+    }
+
+    const { data: cls, error } = await supabase.from('classes')
+        .select('id')
+        .eq('program', program)
+        .eq('branch', branch)
+        .eq('semester', semester)
+        .eq('section', section)
+        .eq('course_id', queryCourseId)
+        .single();
+        
+    if (error || !cls) return [];
+    return getMarksForClass(cls.id);
+}
+
 export async function getMarksForClass(classId: string): Promise<MarksRecord[]> {
     const supabase = await createServerSupabaseClient();
-
     const { data, error } = await supabase
         .from('marks')
         .select('*, students(college_id, profiles(full_name))')
@@ -167,17 +210,22 @@ export async function getMarksForClass(classId: string): Promise<MarksRecord[]> 
 export async function saveMarksBatch(records: MarksRecord[]): Promise<ActionResult> {
     const supabase = await createServerSupabaseClient();
 
-    const upserts = records.map(r => ({
-        id: r.recordId?.startsWith('temp') ? undefined : r.recordId || undefined,
-        student_id: r.studentId,
-        class_id: r.classId,
-        ia1: r.ia1,
-        ia2: r.ia2,
-        other: r.other,
-        see: r.see,
-        total: r.total,
-        grade: r.grade,
-    }));
+    const upserts = records.map(r => {
+        const payload: any = {
+            student_id: r.studentId,
+            class_id: r.classId,
+            ia1: r.ia1,
+            ia2: r.ia2,
+            other: r.other,
+            see: r.see,
+            total: r.total,
+            grade: r.grade,
+        };
+        if (r.recordId && !r.recordId.startsWith('temp')) {
+            payload.id = r.recordId;
+        }
+        return payload;
+    });
 
     const { error } = await supabase.from('marks').upsert(upserts, { onConflict: 'student_id,class_id' });
     if (error) return { success: false, error: error.message };
@@ -198,8 +246,9 @@ export async function calculateFinalMarks(classId: string, studentIds: string[])
     const results = (marks || []).map((m: any) => {
         const ia1 = (m.ia1 ?? 0) / 2; // 40 -> 20
         const ia2 = (m.ia2 ?? 0) / 2; // 40 -> 20
-        const see60 = ((m.see ?? 0) / 100) * 60; // 100 -> 60
-        const total = Math.round(ia1 + ia2 + see60);
+        const other = m.other ?? 0;   // 20 -> 20
+        const see40 = ((m.see ?? 0) / 100) * 40; // 100 -> 40
+        const total = Math.round(ia1 + ia2 + other + see40);
 
         let grade = 'F';
         if (total >= 90) grade = 'O';
@@ -281,3 +330,4 @@ export async function getStudentMarksForDisplay(studentId: string): Promise<Seme
 
     return Object.values(semesterMap).sort((a, b) => a.semester - b.semester);
 }
+

@@ -1,6 +1,6 @@
 'use server';
 
-import { createServerSupabaseClient } from '@/lib/supabase';
+import { createServiceRoleClient as createServerSupabaseClient } from '@/lib/supabase';
 import type { ActionResult } from '@/lib/types';
 
 export async function getOpportunities(typeFilter?: 'placement' | 'internship'): Promise<any[]> {
@@ -163,3 +163,4 @@ export async function getStudentApplications(userId: string): Promise<any[]> {
         appliedAt: app.applied_at
     }));
 }
+

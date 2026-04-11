@@ -35,10 +35,14 @@ const getNotificationIcon = (type: NotificationMessage['type']) => {
     default: return <Info className="h-4 w-4 text-primary" />;
   }
 };
+// Global cache to prevent duplicate fetching from multiple instances of NotificationBell (mobile + desktop rendering)
+let notificationsCachePromise: Promise<any> | null = null;
+let lastNotificationsFetchTime = 0;
 
 export function NotificationBell() {
   const [notifications, setNotifications] = React.useState<NotificationMessage[]>([]);
   const [isOpen, setIsOpen] = React.useState(false);
+  const [notificationsHref, setNotificationsHref] = React.useState('/notifications');
   const { toast } = useToast();
 
   const fetchNotifications = React.useCallback(async () => {
@@ -47,7 +51,13 @@ export function NotificationBell() {
     const user = JSON.parse(storedUserString);
     if (!user?.uid) return;
     try {
-      const result = await getNotificationsForUser(user.uid, 20);
+      const now = Date.now();
+      if (!notificationsCachePromise || now - lastNotificationsFetchTime > 5000) {
+        notificationsCachePromise = getNotificationsForUser(user.uid, 20);
+        lastNotificationsFetchTime = now;
+      }
+      const result = await notificationsCachePromise;
+      
       if (result.success && result.data) {
         setNotifications(result.data as NotificationMessage[]);
       }
@@ -58,6 +68,21 @@ export function NotificationBell() {
 
   React.useEffect(() => {
     fetchNotifications();
+    // Derive the role-specific notifications route
+    try {
+      const stored = localStorage.getItem('loggedInUser');
+      if (stored) {
+        const u = JSON.parse(stored);
+        const role = u?.role || 'student';
+        const roleMap: Record<string, string> = {
+          super_admin: '/admin/notifications',
+          teacher: '/teacher/notifications',
+          employee: '/employee/notifications',
+          student: '/student/notifications',
+        };
+        setNotificationsHref(roleMap[role] ?? '/notifications');
+      }
+    } catch { /* ignore */ }
     // Poll every 5 minutes (300,000ms) to refresh notifications
     const interval = setInterval(fetchNotifications, 300000);
     return () => clearInterval(interval);
@@ -167,7 +192,7 @@ export function NotificationBell() {
           )}
         </ScrollArea>
         <div className="p-2 border-t bg-muted/20 text-center">
-          <Link href="/notifications" onClick={() => setIsOpen(false)}>
+          <Link href={notificationsHref} onClick={() => setIsOpen(false)}>
             <Button variant="ghost" size="sm" className="text-xs w-full text-muted-foreground hover:text-foreground">View all notifications</Button>
           </Link>
         </div>

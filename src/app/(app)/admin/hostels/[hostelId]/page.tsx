@@ -18,10 +18,11 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { getHostelDetails, updateHostelInfo, addHostelRoom, allocateStudentToRoom, removeStudentFromRoom, updateComplaintStatus, deleteHostel, getUnallocatedStudentsCount } from '@/actions/hostel-actions';
+import { getHostelDetails, updateHostelInfo, addHostelRoom, deleteHostelRoom, allocateStudentToRoom, removeStudentFromRoom, updateComplaintStatus, deleteHostel, getUnallocatedStudentsCount } from '@/actions/hostel-actions';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { getStudents } from '@/actions/student-actions';
 import type { Student, HostelDetails, Room, Complaint } from '@/lib/types';
+import { useAuthProtection } from '@/hooks/useAuthProtection';
 
 
 // --- DIALOGS ---
@@ -129,7 +130,7 @@ interface AllocateRoomDialogProps {
     onOpenChange: (open: boolean) => void;
     rooms: Room[];
     availableStudents: Student[];
-    onAllocateStudent: (roomNumber: string, studentId: string) => Promise<boolean>;
+    onAllocateStudent: (roomId: string, studentId: string) => Promise<boolean>;
 }
 
 function AllocateRoomDialog({ isOpen, onOpenChange, rooms, availableStudents, onAllocateStudent }: AllocateRoomDialogProps) {
@@ -160,7 +161,7 @@ function AllocateRoomDialog({ isOpen, onOpenChange, rooms, availableStudents, on
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
             <DialogContent><DialogHeader><DialogTitle>Allocate Room to Student</DialogTitle><DialogDescription>Assign an available student to a vacant spot.</DialogDescription></DialogHeader>
                 <div className="grid gap-4 py-4">
-                    <div className="grid grid-cols-4 items-center gap-4"><Label htmlFor="allocate-room" className="text-right">Room</Label><Select value={selectedRoom} onValueChange={setSelectedRoom} disabled={isAllocating}><SelectTrigger id="allocate-room" className="col-span-3"><SelectValue placeholder="Select available room" /></SelectTrigger><SelectContent>{availableRooms.length > 0 ? availableRooms.map(room => (<SelectItem key={room.roomNumber} value={room.roomNumber}>{room.roomNumber} ({room.residents.length}/{room.capacity} filled)</SelectItem>)) : <SelectItem value="none" disabled>No rooms with vacancies</SelectItem>}</SelectContent></Select></div>
+                    <div className="grid grid-cols-4 items-center gap-4"><Label htmlFor="allocate-room" className="text-right">Room</Label><Select value={selectedRoom} onValueChange={setSelectedRoom} disabled={isAllocating}><SelectTrigger id="allocate-room" className="col-span-3"><SelectValue placeholder="Select available room" /></SelectTrigger><SelectContent>{availableRooms.length > 0 ? availableRooms.map(room => (<SelectItem key={room.id} value={room.id}>{room.roomNumber} ({room.residents.length}/{room.capacity} filled)</SelectItem>)) : <SelectItem value="none" disabled>No rooms with vacancies</SelectItem>}</SelectContent></Select></div>
                     <div className="grid grid-cols-4 items-center gap-4"><Label htmlFor="allocate-student" className="text-right">Student</Label><Select value={selectedStudent} onValueChange={setSelectedStudent} disabled={isAllocating}><SelectTrigger id="allocate-student" className="col-span-3"><SelectValue placeholder="Select available student" /></SelectTrigger><SelectContent>{availableStudents.length > 0 ? availableStudents.map(student => (<SelectItem key={student.id} value={student.id!}>{student.name} ({student.collegeId})</SelectItem>)) : <SelectItem value="none" disabled>No unassigned students found</SelectItem>}</SelectContent></Select></div>
                     {error && <p className="col-span-4 text-center text-sm text-destructive">{error}</p>}
                 </div>
@@ -174,27 +175,43 @@ interface ManageRoomDialogProps {
     isOpen: boolean;
     onOpenChange: (open: boolean) => void;
     room: Room | null;
-    onRemoveStudent: (roomNumber: string, studentId: string) => Promise<boolean>;
+    onRemoveStudent: (roomId: string, studentId: string) => Promise<boolean>;
+    onDeleteRoom: (roomId: string) => Promise<boolean>;
+    isEmployee: boolean;
 }
 
-function ManageRoomDialog({ isOpen, onOpenChange, room, onRemoveStudent }: ManageRoomDialogProps) {
+function ManageRoomDialog({ isOpen, onOpenChange, room, onRemoveStudent, onDeleteRoom, isEmployee }: ManageRoomDialogProps) {
     const [isRemoving, setIsRemoving] = React.useState<Record<string, boolean>>({});
-    React.useEffect(() => { if (!isOpen) setIsRemoving({}); }, [isOpen]);
+    const [isDeletingRoom, setIsDeletingRoom] = React.useState(false);
+    React.useEffect(() => { if (!isOpen) { setIsRemoving({}); setIsDeletingRoom(false); } }, [isOpen]);
     if (!room) return null;
 
     const handleRemoveClick = async (studentId: string) => {
         setIsRemoving(prev => ({ ...prev, [studentId]: true }));
-        await onRemoveStudent(room.roomNumber, studentId);
+        await onRemoveStudent(room.id, studentId);
         setIsRemoving(prev => ({ ...prev, [studentId]: false }));
-    }
+    };
+
+    const handleDeleteRoomClick = async () => {
+        setIsDeletingRoom(true);
+        const ok = await onDeleteRoom(room.id);
+        if (ok) onOpenChange(false);
+        else setIsDeletingRoom(false);
+    };
 
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
             <DialogContent><DialogHeader><DialogTitle>Manage Room: {room.roomNumber}</DialogTitle><DialogDescription>Capacity: {room.capacity} | Occupied: {room.residents.length}</DialogDescription></DialogHeader>
                 <div className="py-4 max-h-[60vh] overflow-y-auto"><h4 className="font-semibold mb-2">Residents:</h4>
-                    {room.residents.length > 0 ? (<ul className="space-y-2">{room.residents.map(resident => (<li key={resident.studentId} className="flex justify-between items-center text-sm p-2 border rounded-md"><div><Link href={`/admin/students/${resident.studentId}`} className="font-medium text-primary hover:underline">{resident.studentName}</Link><span className="text-muted-foreground"> ({resident.studentId})</span></div><Button variant="destructive" size="sm" onClick={() => handleRemoveClick(resident.studentId)} disabled={isRemoving[resident.studentId]}>{isRemoving[resident.studentId] ? <Loader2 className="h-4 w-4 animate-spin" /> : "Remove"}</Button></li>))}</ul>) : (<p className="text-sm text-muted-foreground">This room is currently empty.</p>)}
+                    {room.residents.length > 0 ? (<ul className="space-y-2">{room.residents.map(resident => (<li key={resident.studentId} className="flex justify-between items-center text-sm p-2 border rounded-md"><div>{isEmployee ? <span className="font-medium text-primary">{resident.studentName}</span> : <Link href={`/admin/students/${resident.studentId}`} className="font-medium text-primary hover:underline">{resident.studentName}</Link>}<span className="text-muted-foreground"> ({resident.collegeId || resident.studentId})</span></div><Button variant="destructive" size="sm" onClick={() => handleRemoveClick(resident.studentId)} disabled={isRemoving[resident.studentId]}>{isRemoving[resident.studentId] ? <Loader2 className="h-4 w-4 animate-spin" /> : "Remove"}</Button></li>))}</ul>) : (<p className="text-sm text-muted-foreground">This room is currently empty.</p>)}
                 </div>
-                <DialogFooter><DialogClose asChild><Button variant="outline">Close</Button></DialogClose></DialogFooter>
+                <DialogFooter className="flex justify-between items-center">
+                    <Button variant="destructive" size="sm" onClick={handleDeleteRoomClick} disabled={isDeletingRoom || room.residents.length > 0}>
+                        {isDeletingRoom ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
+                        Delete Room
+                    </Button>
+                    <DialogClose asChild><Button variant="outline">Close</Button></DialogClose>
+                </DialogFooter>
             </DialogContent>
         </Dialog>
     );
@@ -204,6 +221,8 @@ function ManageRoomDialog({ isOpen, onOpenChange, room, onRemoveStudent }: Manag
 export default function AdminHostelDetailPage() {
     const params = useParams();
     const router = useRouter();
+    const { currentUser } = useAuthProtection();
+    const isEmployee = currentUser?.role === 'employee';
     const hostelId = params.hostelId as string;
     const [hostelData, setHostelData] = React.useState<HostelDetails | null>(null);
     const [allStudents, setAllStudents] = React.useState<Student[]>([]);
@@ -230,7 +249,7 @@ export default function AdminHostelDetailPage() {
                 const count = await getUnallocatedStudentsCount();
                 setUnallocatedCount(count);
             }
-            else { setError("Hostel not found."); router.push('/admin/hostels'); }
+            else { setError("Hostel not found."); router.push(isEmployee ? '/employee/hostel' : '/admin/hostels'); }
             setAllStudents(studentsData);
         } catch (err: any) {
             console.error("Failed to fetch hostel details:", err);
@@ -255,8 +274,9 @@ export default function AdminHostelDetailPage() {
 
     const handleAddRoom = (roomNumber: string, capacity: number) => handleServerAction(addHostelRoom(hostelId, { roomNumber, capacity }), `Room ${roomNumber} added.`);
     const handleEditHostelInfo = (updatedData: Partial<HostelDetails>) => handleServerAction(updateHostelInfo(hostelId, updatedData), `Hostel info updated.`);
-    const handleAllocateStudent = (roomNumber: string, studentId: string) => handleServerAction(allocateStudentToRoom(roomNumber, studentId), `Student allocated.`);
-    const handleRemoveStudent = (roomNumber: string, studentId: string) => handleServerAction(removeStudentFromRoom(roomNumber, studentId), `Student removed.`);
+    const handleAllocateStudent = (roomId: string, studentId: string) => handleServerAction(allocateStudentToRoom(roomId, studentId), `Student allocated.`);
+    const handleRemoveStudent = (roomId: string, studentId: string) => handleServerAction(removeStudentFromRoom(roomId, studentId), `Student removed.`);
+    const handleDeleteRoom = (roomId: string) => handleServerAction(deleteHostelRoom(roomId), `Room deleted.`);
 
     const handleComplaintStatusChange = async (complaintId: string, newStatus: Complaint['status']) => {
         setActionLoading(prev => ({ ...prev, [complaintId]: true }));
@@ -269,7 +289,7 @@ export default function AdminHostelDetailPage() {
         const result = await deleteHostel(hostelId);
         if (result.success) {
             toast({ title: "Hostel Deleted", description: result.message });
-            router.push('/admin/hostels');
+            router.push(isEmployee ? '/employee/hostel' : '/admin/hostels');
         } else {
             toast({ variant: "destructive", title: "Error", description: result.error });
             setIsDeleting(false);
@@ -395,7 +415,7 @@ export default function AdminHostelDetailPage() {
                                 {filteredRooms.map((room) => (
                                     <Card key={room.roomNumber} className="flex flex-col items-center p-3 text-center border hover:shadow-md transition-shadow">
                                         <div className="flex items-center justify-between w-full mb-2"><span className="font-semibold text-lg">{room.roomNumber}</span>{getOccupancyBadge(room)}</div>
-                                        <div className="flex flex-wrap justify-center gap-2 mb-2 min-h-[32px]">{room.residents.length > 0 ? room.residents.map(res => <Tooltip key={res.studentId}><TooltipTrigger asChild><Link href={`/admin/students/${res.studentId}`}><User className="h-6 w-6 text-primary" /></Link></TooltipTrigger><TooltipContent><p>{res.studentName}</p></TooltipContent></Tooltip>) : <DoorOpen className="h-8 w-8 text-muted-foreground" />}</div>
+                                        <div className="flex flex-wrap justify-center gap-2 mb-2 min-h-[32px]">{room.residents.length > 0 ? room.residents.map(res => <Tooltip key={res.studentId}><TooltipTrigger asChild>{isEmployee ? <div><User className="h-6 w-6 text-primary" /></div> : <Link href={`/admin/students/${res.studentId}`}><User className="h-6 w-6 text-primary" /></Link>}</TooltipTrigger><TooltipContent><p>{res.studentName} ({res.collegeId || res.studentId})</p></TooltipContent></Tooltip>) : <DoorOpen className="h-8 w-8 text-muted-foreground" />}</div>
                                         <Button variant="outline" size="sm" className="w-full mt-auto text-xs h-7" onClick={() => handleOpenManageRoom(room)}>Manage</Button>
                                     </Card>
                                 ))}
@@ -417,7 +437,7 @@ export default function AdminHostelDetailPage() {
                 <AddRoomDialog isOpen={dialogs.addRoom} onOpenChange={(open) => setDialogs(d => ({ ...d, addRoom: open }))} onAddRoom={handleAddRoom} existingRoomNumbers={hostelData.rooms.map(r => r.roomNumber)} hostelPrefix={hostelPrefix} />
                 <EditHostelDialog isOpen={dialogs.editHostel} onOpenChange={(open) => setDialogs(d => ({ ...d, editHostel: open }))} hostel={hostelData} onSaveChanges={handleEditHostelInfo} />
                 <AllocateRoomDialog isOpen={dialogs.allocateRoom} onOpenChange={(open) => setDialogs(d => ({ ...d, allocateRoom: open }))} rooms={hostelData.rooms} availableStudents={availableStudentsForHostel} onAllocateStudent={handleAllocateStudent} />
-                <ManageRoomDialog isOpen={dialogs.manageRoom} onOpenChange={(open) => setDialogs(d => ({ ...d, manageRoom: open }))} room={selectedRoomToManage} onRemoveStudent={handleRemoveStudent} />
+                <ManageRoomDialog isOpen={dialogs.manageRoom} onOpenChange={(open) => setDialogs(d => ({ ...d, manageRoom: open }))} room={selectedRoomToManage} onRemoveStudent={handleRemoveStudent} onDeleteRoom={handleDeleteRoom} isEmployee={isEmployee} />
             </>}
         </TooltipProvider>
     );

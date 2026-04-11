@@ -43,3 +43,4 @@ export async function markAllNotificationsRead(notificationIds: string[]) {
   if (error) return { success: false, error: error.message };
   return { success: true };
 }
+

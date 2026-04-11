@@ -252,6 +252,10 @@ export interface ExamSchedule {
   status?: string;
   year?: number | string;
   credits?: number;
+  maxInternalMarks?: number | null;
+  maxExternalMarks?: number | null;
+  examType?: string;
+  courseId?: string;
 }
 
 export interface HallTicketRule {
@@ -434,7 +438,7 @@ export interface Room {
   roomNumber: string;
   capacity: number;
   occupied?: number;
-  residents: { studentId: string; studentName: string; }[];
+  residents: { studentId: string; studentName: string; collegeId?: string; }[];
 }
 
 export interface HostelDetails {
@@ -500,4 +504,15 @@ export interface HallTicketExam {
   date?: string;
   startTime?: string;
   endTime?: string;
+}
+
+export interface HostelMenu {
+  id: string;
+  hostel_id: string;
+  day_of_week: 'Sunday' | 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday' | string;
+  morning_slot: string;
+  afternoon_slot: string;
+  evening_slot: string;
+  dinner_slot: string;
+  created_at?: string;
 }

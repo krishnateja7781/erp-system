@@ -13,10 +13,6 @@ ERP SYSTEM
 **A complete, production-grade college ERP — four role portals, real-time virtual classrooms,  
 AI integration, and a 24-table PostgreSQL schema — all in a single serverless Next.js application.**
 
-[Live Demo](https://erp-system-ashy-nu.vercel.app) · [Repository](https://github.com/krishnateja7781/erp-system)
-
-</div>
-
 ---
 
 ## Features
@@ -50,6 +46,9 @@ AI integration, and a 24-table PostgreSQL schema — all in a single serverless 
 - **Notifications Broadcast** — Send announcements to all roles or role-specific groups.
 - **Profile & Settings** — Personal profile management and account security controls.
 
+  <img width="1600" height="674" alt="image" src="https://github.com/user-attachments/assets/b08029af-1f4d-41af-93c8-3c366e1f8a70" />
+
+
 ### Teacher Portal
 - **Personalized Dashboard** — Course load summary, upcoming exam schedule, and class attendance snapshot.
 - **Unified Marks Management** — Enter and manage the four-component grading schema (IA-1, IA-2, Others, SEE) with automatic scaling, total computation, and grade assignment; sequential entry locking enforced in the UI.
@@ -65,6 +64,9 @@ AI integration, and a 24-table PostgreSQL schema — all in a single serverless 
 - **Library Access** — Browse the institution's book catalog and submit borrowing requests.
 - **Notifications Panel** — View all broadcasts targeted at the teacher role.
 - **Profile & Settings** — Personal details management and account security controls.
+
+  <img width="1600" height="732" alt="image" src="https://github.com/user-attachments/assets/adc365a7-256c-478b-b1eb-c0e4b5c16513" />
+
 
 ### Student Portal
 - **Personalized Dashboard** — Attendance percentage, upcoming exam reminders, and active fee dues in a unified overview.
@@ -86,6 +88,9 @@ AI integration, and a 24-table PostgreSQL schema — all in a single serverless 
 - **Notifications Center** — View all institutional broadcasts.
 - **Profile & Settings** — Personal details, profile photo, and account security.
 
+  <img width="1600" height="728" alt="image" src="https://github.com/user-attachments/assets/f3acbe2a-2932-4f4e-a29a-eba9904ac341" />
+
+
 ### Employee Portal
 - **Role-Scoped Dashboard** — Institutional overview statistics relevant to the employee's assigned functional area.
 - **Exam & Marks Module** (`exam_marks_management` type) — Class group management, course catalog by program at `/employee/exams/courses/[program]`, exam scheduling, marks entry using the identical IA-1/IA-2/Others/SEE schema as the teacher portal, and an exam results dashboard.
@@ -96,6 +101,9 @@ AI integration, and a 24-table PostgreSQL schema — all in a single serverless 
 - **User Accounts** — Manage portal-level accounts within the employee's functional scope.
 - **Notifications Center** — Broadcast and view announcements.
 - **Settings** — Account and profile management.
+
+  <img width="1600" height="725" alt="image" src="https://github.com/user-attachments/assets/d769767e-ae4e-4cbd-86cd-79aaf5667fa3" />
+
 
 ### Virtual Classroom System
 - **Supabase Realtime Primary Channel** — Subscribes to `postgres_changes` events (`INSERT`, `DELETE`) on `classroom_posts` for live message delivery without a separate WebSocket server.

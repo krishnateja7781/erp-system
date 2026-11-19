@@ -71,8 +71,8 @@ export async function middleware(request: NextRequest) {
   }
 
   // ── Global routes always allowed for any authenticated user ──
+  // BUG FIX #18: /classrooms should NOT be accessible by employees — moved to role-specific blocks
   const isGlobalRoute = pathname.startsWith('/settings') ||
-                        pathname.startsWith('/classrooms') ||
                         pathname.startsWith('/library')
   if (isGlobalRoute) return supabaseResponse
 
@@ -84,13 +84,13 @@ export async function middleware(request: NextRequest) {
 
   // ── Teacher ──
   if (role === 'teacher') {
-    if (pathname.startsWith('/teacher')) return supabaseResponse
+    if (pathname.startsWith('/teacher') || pathname.startsWith('/classrooms')) return supabaseResponse
     return NextResponse.redirect(new URL('/teacher/dashboard', request.url))
   }
 
   // ── Student ──
   if (role === 'student') {
-    if (pathname.startsWith('/student')) return supabaseResponse
+    if (pathname.startsWith('/student') || pathname.startsWith('/classrooms')) return supabaseResponse
     return NextResponse.redirect(new URL('/student/dashboard', request.url))
   }
 

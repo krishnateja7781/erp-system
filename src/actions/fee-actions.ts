@@ -61,8 +61,9 @@ export async function getStudentFeeDetails(studentId: string): Promise<{ success
         });
     });
 
-    if (collegeTotal === 0) collegeTotal = 150000;
-    if (hostelTotal === 0) hostelTotal = 50000;
+    // BUG FIX #15: removed hardcoded fallback fee amounts (150000/50000).
+    // If no fee records exist, return zero instead of misleading hardcoded values.
+    // This lets the UI accurately show 'No fees generated yet' instead of fake totals.
 
     return {
         success: true,

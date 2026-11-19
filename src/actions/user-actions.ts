@@ -1,106 +1,84 @@
-
 'use server';
 
-import { findOneWhere, readCollection, updateDoc, writeCollection, generateId, nowISO, insertDoc } from '@/lib/db';
+import { createServerSupabaseClient } from '@/lib/supabase';
 import type { ActionResult } from '@/lib/types';
 
-
-interface ProfileResult {
-    success: boolean;
-    data?: any;
-    error?: string;
-}
-
-export async function getUserProfileOnLogin(uid: string, email: string | null): Promise<ProfileResult> {
-    if (!uid) {
-        return { success: false, error: 'User UID is missing.' };
-    }
-
-    try {
-        const userProfile = await findOneWhere<any>('users', (u) => u.id === uid || u.uid === uid);
-
-        if (!userProfile) {
-            return { success: false, error: 'Your user profile was not found. Please contact administration.' };
-        }
-
-        const userRole = userProfile.role;
-        if (!userRole) {
-            return { success: false, error: `User with UID ${uid} is missing the 'role' field.` };
-        }
-
-        // Log login activity
-        try {
-            await insertDoc('loginActivities', {
-                id: generateId(),
-                userId: uid,
-                userRole,
-                userName: userProfile.name || email || 'Unknown',
-                timestamp: nowISO(),
-                status: 'Success',
-            });
-        } catch { /* non-critical */ }
-
-        let collectionName: 'students' | 'teachers' | 'admins';
-        switch (userRole) {
-            case 'student': collectionName = 'students'; break;
-            case 'teacher': collectionName = 'teachers'; break;
-            case 'admin': collectionName = 'admins'; break;
-            default:
-                return { success: false, error: `Unrecognized user role: '${userRole}'.` };
-        }
-
-        const detailedProfile = await findOneWhere<any>(collectionName, (item) => item.id === uid || item.user_uid === uid);
-
-        if (!detailedProfile) {
-            return { success: false, error: `Your detailed ${userRole} profile is missing. Please contact administration.` };
-        }
-
-        const merged = { ...userProfile, ...detailedProfile, id: detailedProfile.id };
-        return { success: true, data: merged };
-
-    } catch (error: any) {
-        console.error(`Server error in getUserProfileOnLogin for UID ${uid}:`, error);
-        return { success: false, error: 'An unexpected server error occurred while retrieving your profile.' };
-    }
-}
-
-
+/**
+ * Sends a password reset email via Supabase Auth.
+ * Replaces the legacy no-op stub that instructed users to "contact admin".
+ */
 export async function sendPasswordResetLink(email: string): Promise<ActionResult> {
     if (!email) {
         return { success: false, error: 'Email is required.' };
     }
-    // Without email sending, just inform admin must reset
-    return { success: true, message: `Password reset requests must be handled by the administrator. Please contact admin for a password reset for ${email}.` };
+    try {
+        const supabase = await createServerSupabaseClient();
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+            redirectTo: `${process.env.NEXT_PUBLIC_APP_URL || ''}/login?type=recovery`,
+        });
+        if (error) {
+            // Don't leak whether the email exists — just say "if account exists, email was sent"
+            console.error('[sendPasswordResetLink] Supabase error:', error.message);
+        }
+        // Always return success to prevent email enumeration
+        return { success: true, message: 'If an account exists for that email, a password reset link has been sent.' };
+    } catch (error: any) {
+        console.error('[sendPasswordResetLink] Unexpected error:', error);
+        return { success: false, error: 'An unexpected error occurred. Please try again.' };
+    }
 }
 
+/**
+ * Updates notification preferences stored in the user's profile metadata.
+ * Replaces the legacy write to local JSON users array.
+ */
 export async function updateNotificationPreferences(uid: string, enabled: boolean): Promise<ActionResult> {
     if (!uid) {
         return { success: false, error: 'User ID is required.' };
     }
     try {
-        const users = await readCollection<any>('users');
-        const idx = users.findIndex((u) => u.id === uid || u.uid === uid);
-        if (idx === -1) return { success: false, error: 'User not found.' };
-        users[idx].settings = { ...(users[idx].settings || {}), notifications: { enabled } };
-        users[idx].updatedAt = nowISO();
-        await writeCollection('users', users);
-        return { success: true, message: 'Notification preferences updated.' };
+        const supabase = await createServerSupabaseClient();
+        const { error } = await supabase
+            .from('profiles')
+            .update({ notification_enabled: enabled, updated_at: new Date().toISOString() })
+            .eq('id', uid);
+
+        if (error) return { success: false, error: error.message };
+        return { success: true, message: `Notifications ${enabled ? 'enabled' : 'disabled'} successfully.` };
     } catch (error: any) {
         return { success: false, error: 'Failed to update preferences.' };
     }
 }
 
+/**
+ * Fetches user settings (currently: notification preferences) from the profiles table.
+ * Replaces the legacy read from local JSON users array.
+ */
 export async function getUserSettings(uid: string): Promise<{ success: boolean; data?: any; error?: string }> {
     if (!uid) {
         return { success: false, error: 'User ID is required.' };
     }
     try {
-        const user = await findOneWhere<any>('users', (u) => u.id === uid || u.uid === uid);
-        if (!user) return { success: false, error: 'User profile not found.' };
-        const settings = user.settings || { notifications: { enabled: true } };
-        return { success: true, data: settings };
+        const supabase = await createServerSupabaseClient();
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('notification_enabled')
+            .eq('id', uid)
+            .single();
+
+        if (error) {
+            // If column doesn't exist yet, return defaults gracefully
+            return { success: true, data: { notifications: { enabled: true } } };
+        }
+        return {
+            success: true,
+            data: {
+                notifications: {
+                    enabled: data?.notification_enabled ?? true,
+                },
+            },
+        };
     } catch (error: any) {
         return { success: false, error: 'Failed to fetch settings.' };
     }
 }
-

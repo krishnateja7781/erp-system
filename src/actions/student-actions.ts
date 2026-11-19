@@ -133,7 +133,8 @@ export async function getStudents() {
     bloodGroup: s.blood_group,
     isHosteler: s.is_hosteler,
     type: s.is_hosteler ? 'Hosteler' : 'Day Scholar',
-    section: 'A',
+    // BUG FIX #26: was hardcoded to 'A' — section is student-specific
+    section: s.section || null,
     status: s.is_graduated ? 'Graduated' : 'Active',
   }))
 }
@@ -432,18 +433,33 @@ export async function getStudentSchedule(studentId: string): Promise<any[]> {
 
 export async function getAvailableSections(program: string, year: string | number, courseId: string): Promise<string[]> {
   const supabase = await createServerSupabaseClient();
-  const { data } = await supabase.from('classes').select('section').eq('academic_year', year.toString());
-  if (!data || data.length === 0) return ["A", "B", "C"];
+  // BUG FIX #27: was ignoring program and courseId params — now properly filters by course
+  let queryCourseId = courseId;
+  if (courseId && !courseId.includes('-')) {
+      const { data: c } = await supabase.from('courses').select('id').eq('code', courseId).single();
+      if (c) queryCourseId = c.id;
+  }
+  const { data } = await supabase
+      .from('classes')
+      .select('section')
+      .eq('academic_year', year.toString())
+      .eq('course_id', queryCourseId);
+  if (!data || data.length === 0) return ['A', 'B', 'C'];
   const sections = Array.from(new Set(data.filter(d => d.section).map(d => d.section)));
-  return sections.length > 0 ? sections : ["A", "B", "C"];
+  return sections.length > 0 ? sections : ['A', 'B', 'C'];
 }
 
 export async function getSectionsForBranch(program: string, branch: string): Promise<string[]> {
   const supabase = await createServerSupabaseClient();
-  const { data } = await supabase.from('classes').select('section');
-  if (!data || data.length === 0) return ["A", "B", "C"];
+  // BUG FIX #28: was ignoring all parameters — now filters by program and branch
+  const { data } = await supabase
+      .from('classes')
+      .select('section')
+      .eq('program', program)
+      .eq('branch', branch);
+  if (!data || data.length === 0) return ['A', 'B', 'C'];
   const sections = Array.from(new Set(data.filter(d => d.section).map(d => d.section)));
-  return sections.length > 0 ? sections : ["A", "B", "C"];
+  return sections.length > 0 ? sections : ['A', 'B', 'C'];
 }
 
 export async function getStudentProfileForTeacher(studentId: string, teacherId?: string): Promise<{ data: any, error: string | null }> {

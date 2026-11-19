@@ -1,12 +1,17 @@
-
 import { NextRequest, NextResponse } from 'next/server';
-import { getIronSession } from 'iron-session';
-import { SESSION_OPTIONS, type SessionUser } from '@/lib/auth-session';
+import { createServerSupabaseClient } from '@/lib/supabase';
 
+/**
+ * POST /api/auth/logout
+ * Signs out the current user using Supabase Auth (replaces legacy iron-session logout).
+ */
 export async function POST(req: NextRequest) {
-    const res = NextResponse.json({ success: true });
-    const session = await getIronSession<{ user?: SessionUser }>(req, res, SESSION_OPTIONS);
-    session.destroy();
-    await session.save();
-    return res;
+    try {
+        const supabase = await createServerSupabaseClient();
+        await supabase.auth.signOut();
+        return NextResponse.json({ success: true });
+    } catch (error: any) {
+        console.error('[Logout Error]', error);
+        return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    }
 }

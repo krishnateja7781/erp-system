@@ -139,9 +139,112 @@ export async function getHallTicket(
     }
 }
 
-export async function getExamById(examId: string): Promise<any> { return null; }
-export interface StudentEligibility { id: string; studentId: string; name: string; collegeId: string; section: string; attendancePercentage: number; feeBalance: number; isEligible: boolean; reasons: string[]; }
-export async function getTeacherExamStudents(examId: string, teacherId: string): Promise<StudentEligibility[]> { return []; }
+// BUG FIX #9: Implement getExamById (was stub returning null)
+export async function getExamById(examId: string): Promise<any> {
+    if (!examId) return null;
+    const supabase = await createServerSupabaseClient();
+    const { data, error } = await supabase
+        .from('exams')
+        .select('*, courses(name, code, program, branch, semester, credits)')
+        .eq('id', examId)
+        .single();
+    if (error || !data) return null;
+    return {
+        id: data.id,
+        courseId: data.courses?.code || data.course_id,
+        courseName: data.courses?.name,
+        program: data.courses?.program || data.program,
+        branch: data.courses?.branch || data.branch,
+        semester: data.semester,
+        year: data.year,
+        examType: data.exam_type,
+        examSessionName: data.exam_type || 'Exam',
+        courseCode: data.courses?.code,
+        date: data.exam_date,
+        startTime: data.start_time,
+        endTime: data.end_time,
+        status: data.status || 'Scheduled',
+        maxInternalMarks: data.max_internal_marks ?? null,
+        maxExternalMarks: data.max_external_marks ?? null,
+        credits: data.courses?.credits ?? null,
+    };
+}
+
+export interface StudentEligibility {
+    id: string;
+    studentId: string;
+    name: string;
+    collegeId: string;
+    section: string;
+    attendancePercentage: number;
+    feeBalance: number;
+    isEligible: boolean;
+    reasons: string[];
+}
+
+// BUG FIX #9: Implement getTeacherExamStudents (was stub returning [])
+export async function getTeacherExamStudents(examId: string, teacherId: string): Promise<StudentEligibility[]> {
+    if (!examId) return [];
+    const supabase = await createServerSupabaseClient();
+
+    // Get the exam details to know which program/branch/semester it targets
+    const exam = await getExamById(examId);
+    if (!exam) return [];
+
+    // Get students in that program/branch/semester
+    const { data: students, error } = await supabase
+        .from('students')
+        .select('id, college_id, section, profiles(full_name)')
+        .eq('program', exam.program)
+        .eq('branch', exam.branch)
+        .eq('current_semester', exam.semester)
+        .eq('is_graduated', false);
+
+    if (error || !students) return [];
+
+    const results: StudentEligibility[] = [];
+    for (const s of students as any[]) {
+        const reasons: string[] = [];
+
+        // Attendance check
+        const { data: attRecs } = await supabase
+            .from('attendance')
+            .select('status')
+            .eq('student_id', s.id);
+
+        const totalAtt = attRecs?.length || 0;
+        const presentAtt = attRecs?.filter((a: any) => a.status === 'Present').length || 0;
+        const attPct = totalAtt > 0 ? Math.round((presentAtt / totalAtt) * 100) : 0;
+
+        if (attPct < 75) {
+            reasons.push(`Attendance ${attPct}% below required 75%`);
+        }
+
+        // Fee balance check
+        const { data: feeRecs } = await supabase
+            .from('fees')
+            .select('balance')
+            .eq('student_id', s.id);
+        const feeBalance = feeRecs?.reduce((sum: number, f: any) => sum + (f.balance || 0), 0) || 0;
+        if (feeBalance > 0) {
+            reasons.push(`Outstanding fee balance: ₹${feeBalance.toLocaleString()}`);
+        }
+
+        results.push({
+            id: s.id,
+            studentId: s.id,
+            name: s.profiles?.full_name || 'Unknown',
+            collegeId: s.college_id,
+            section: s.section || 'A',
+            attendancePercentage: attPct,
+            feeBalance,
+            isEligible: reasons.length === 0,
+            reasons,
+        });
+    }
+
+    return results;
+}
 export async function getTeacherExams(teacherId: string): Promise<any[]> {
     const supabase = await createServerSupabaseClient();
     

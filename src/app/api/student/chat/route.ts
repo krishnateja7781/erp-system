@@ -1,10 +1,10 @@
 // ============================================================
 // Student Chatbot API Route — POST /api/student/chat
-// Auth: iron-session, role must be 'student'
+// Auth: Supabase JWT session, role must be 'student'
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getCurrentUser } from '@/lib/auth-session';
+import { getSession } from '@/actions/auth-actions';
 import { detectStudentIntent } from '@/chatbots/student/intent';
 import * as svc from '@/chatbots/student/service';
 import * as fmt from '@/chatbots/student/formatter';
@@ -14,8 +14,13 @@ const MAX_MESSAGE_LENGTH = 300;
 
 export async function POST(request: NextRequest) {
   try {
-    // ── Auth ──
-    const user = await getCurrentUser();
+    // ── Auth (Supabase JWT) ──
+    const sessionResult = await getSession();
+    const profile = sessionResult?.data?.profile;
+    // For students, use profile.id as the studentDocId (their Supabase auth UID)
+    const resolvedStudentId = profile?.id || null;
+    const user = profile ? { uid: profile.id, name: profile.full_name || 'Student', email: profile.email, role: profile.role, studentDocId: resolvedStudentId } : null;
+
     if (!user) {
       return NextResponse.json<ChatError>(
         { success: false, role: 'student', intent: 'Error', message: 'Please log in to use the chatbot.', metadata: {} },

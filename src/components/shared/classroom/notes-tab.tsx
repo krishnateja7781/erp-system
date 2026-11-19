@@ -279,7 +279,14 @@ export function NotesTab({ classroomId, userId, userName, userRole }: NotesTabPr
                         variant="outline"
                         size="sm"
                         className="gap-1.5 text-xs h-8"
-                        onClick={() => window.open(note.fileUrl, '_blank')}
+                        onClick={() => {
+                          // Images and text files open natively; docs/PDFs use Google Docs Viewer
+                          const isNativeViewable = note.fileType.includes('image') || note.fileType.includes('text/plain');
+                          const url = isNativeViewable
+                            ? note.fileUrl
+                            : `https://docs.google.com/viewer?url=${encodeURIComponent(note.fileUrl)}&embedded=true`;
+                          window.open(url, '_blank');
+                        }}
                       >
                         <Eye className="h-3.5 w-3.5" />
                         View Document

@@ -2,6 +2,7 @@
 
 import { createServiceRoleClient as createServerSupabaseClient } from '@/lib/supabase';
 import type { ActionResult, ScheduleEntry } from '@/lib/types';
+import { PERIOD_SLOTS } from '@/lib/utils';
 
 export interface TimetableFilters {
     programs: string[];
@@ -138,14 +139,23 @@ export async function saveTimetableBulk(payload: any): Promise<ActionResult> {
     }
     
     for (const slot of slots) {
-        // Find the specific class ID for this course
+        // BUG FIX #11: was generating '0{period}:00:00' which is wrong (1 AM for period 1, invalid for period 10+)
+        // Now use PERIOD_SLOTS to map period number to the correct real clock time
         const targetClass = classList?.find(c => c.courses?.code === slot.courseId);
         if (targetClass) {
+            const periodSlot = PERIOD_SLOTS[slot.period];
+            const startHour = periodSlot ? periodSlot.start[0] : 9 + (slot.period - 1);
+            const startMin = periodSlot ? periodSlot.start[1] : 0;
+            const endHour = periodSlot ? periodSlot.end[0] : startHour + 1;
+            const endMin = periodSlot ? periodSlot.end[1] : 0;
+            const startStr = `${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}:00`;
+            const endStr = `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}:00`;
+
             const { error: insertErr } = await supabase.from('timetables').insert({
                 class_id: targetClass.id,
                 day_of_week: slot.day,
-                start_time: `0${slot.period}:00:00`,
-                end_time: `0${slot.period}:50:00`
+                start_time: startStr,
+                end_time: endStr
             });
             if (insertErr) {
                 return { success: false, error: 'Database Error: ' + insertErr.message };

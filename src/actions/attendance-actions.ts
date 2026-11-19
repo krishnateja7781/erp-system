@@ -34,6 +34,11 @@ export interface CsvAttendanceRow {
     [key: string]: any;
 }
 
+export interface UploadAttendanceCsvOptions {
+    classId: string;
+    period?: number;
+}
+
 export async function getStudentAttendanceRecords(program?: string, branch?: string, semester?: number, section?: string, courseId?: string, startDate?: string, endDate?: string): Promise<StudentAttendanceRow[]> {
     const supabase = await createServerSupabaseClient();
     
@@ -55,7 +60,8 @@ export async function getStudentAttendanceRecords(program?: string, branch?: str
     return studentsList.map((s: any) => {
         const studAtts = (attendanceRecs || []).filter((a: any) => a.student_id === s.id);
         const total = studAtts.length;
-        const present = studAtts.filter((a: any) => a.status === 'present').length;
+        // BUG FIX #6: was checking lowercase 'present' but saveAttendance writes 'Present' (capital P)
+        const present = studAtts.filter((a: any) => a.status === 'Present').length;
         return {
             studentId: s.id,
             studentName: s.profiles?.full_name || 'Unknown',
@@ -81,22 +87,47 @@ export async function getAggregatedAttendance(program?: string, branch?: string,
     };
 }
 
-export async function uploadAttendanceCsv(records: CsvAttendanceRow[]): Promise<{success: boolean; message?: string; error?: string; savedCount: number; skippedCount: number; errors: any[]}> {
+export async function uploadAttendanceCsv(
+    records: CsvAttendanceRow[],
+    options?: UploadAttendanceCsvOptions
+): Promise<{success: boolean; message?: string; error?: string; savedCount: number; skippedCount: number; errors: any[]}> {
     const supabase = await createServerSupabaseClient();
     
-    let dbClassId = '';
-    
+    // BUG FIX #8: was hardcoded to empty string ''; class_id must come from options or per-row CSV field
+    const defaultClassId = options?.classId || '';
+    const defaultPeriod = options?.period || null;
+
     const inserts = [];
+    const skippedErrors: string[] = [];
     for (const rec of records) {
-        if (!rec.StudentId || !rec.Date || !rec.Status) continue;
-        const { data: targetStud } = await supabase.from('students').select('id').eq('college_id', rec.StudentId).limit(1);
+        const studentCollegeId = rec.StudentId || rec.studentId;
+        const date = rec.Date || rec.date;
+        const statusRaw = rec.Status || rec.status;
+        const classId = rec.classId || rec.class_id || defaultClassId;
+        const period = rec.period || defaultPeriod;
+
+        if (!studentCollegeId || !date || !statusRaw) {
+            skippedErrors.push(`Skipped row: missing StudentId, Date, or Status`);
+            continue;
+        }
+        if (!classId) {
+            skippedErrors.push(`Skipped row for ${studentCollegeId}: no classId provided`);
+            continue;
+        }
+
+        const { data: targetStud } = await supabase.from('students').select('id').eq('college_id', studentCollegeId).limit(1);
         if (targetStud && targetStud.length > 0) {
+            const statusNorm = statusRaw.toLowerCase() === 'p' || statusRaw.toLowerCase() === 'present' ? 'Present' : 'Absent';
             inserts.push({
-                class_id: dbClassId,
+                class_id: classId,
                 student_id: targetStud[0].id,
-                date: rec.Date,
-                status: rec.Status.toLowerCase() === 'p' || rec.Status.toLowerCase() === 'present' ? 'present' : 'absent'
+                date,
+                period,
+                // BUG FIX: normalize to 'Present'/'Absent' consistent with saveAttendance
+                status: statusNorm,
             });
+        } else {
+            skippedErrors.push(`Student not found: ${studentCollegeId}`);
         }
     }
     
@@ -105,7 +136,13 @@ export async function uploadAttendanceCsv(records: CsvAttendanceRow[]): Promise<
         if (error) return { success: false, savedCount: 0, skippedCount: records.length, errors: [error.message], error: error.message };
     }
     
-    return { success: true, message: `Successfully appended ${inserts.length} CSV attendance records.`, savedCount: inserts.length, skippedCount: records.length - inserts.length, errors: [] };
+    return { 
+        success: true, 
+        message: `Successfully appended ${inserts.length} attendance records. Skipped: ${records.length - inserts.length}.`, 
+        savedCount: inserts.length, 
+        skippedCount: records.length - inserts.length, 
+        errors: skippedErrors 
+    };
 }
 
 export async function getAttendanceForExport(filters?: any): Promise<{ success: boolean; rows?: any[]; error?: string }> {

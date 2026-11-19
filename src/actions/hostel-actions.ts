@@ -252,7 +252,8 @@ export async function allocateStudentToRoom(roomId: string, studentId: string): 
         return { success: false, error: 'Failed to verify room capacity.' };
     }
     
-    if (roomData.hostel_allocations.length >= roomData.capacity) {
+    // BUG FIX #34: added null safety — join may return null instead of [] in edge cases
+    if ((roomData.hostel_allocations || []).length >= roomData.capacity) {
         return { success: false, error: 'This room is already operating at maximum capacity.' };
     }
 

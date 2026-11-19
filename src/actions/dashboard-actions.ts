@@ -217,13 +217,34 @@ export async function getAdminDashboardStats(): Promise<AdminDashboardData> {
         const presentAtt = attendanceData?.filter(a => a.status === 'present').length || 0;
         const overallAttPct = totalAtt > 0 ? Math.round((presentAtt / totalAtt) * 100) : 0;
 
-        // Mock trend
-        const attendanceTrend = [
-            { month: 'Jan', attendance: overallAttPct || 85 },
-            { month: 'Feb', attendance: overallAttPct || 88 }
+        // Build real 12-month attendance trend
+        const { data: allAttendance } = await supabase.from('attendance').select('date, status');
+        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const monthlyMap: Record<string, { total: number; present: number }> = {};
+        (allAttendance || []).forEach((a: any) => {
+            if (!a.date) return;
+            try {
+                const d = new Date(a.date);
+                const key = `${d.getFullYear()}-${monthNames[d.getMonth()]}`;
+                if (!monthlyMap[key]) monthlyMap[key] = { total: 0, present: 0 };
+                monthlyMap[key].total++;
+                if (a.status === 'Present') monthlyMap[key].present++;
+            } catch { /* skip invalid dates */ }
+        });
+        const attendanceTrend = Object.entries(monthlyMap)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .slice(-6) // last 6 months
+            .map(([key, stats]) => ({
+                month: key.split('-')[1],
+                attendance: stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0
+            }));
+        // Fallback if no data
+        const finalAttendanceTrend = attendanceTrend.length > 0 ? attendanceTrend : [
+            { month: 'Jan', attendance: 0 },
+            { month: 'Feb', attendance: 0 }
         ];
 
-        // Recent users
+        // Recent profiles — shown as "recently registered" not "recent logins"
         const { data: recentProfiles } = await supabase.from('profiles').select('*').order('created_at', { ascending: false }).limit(5);
         const recentLogins = recentProfiles?.map(p => ({
             id: p.id,
@@ -238,7 +259,7 @@ export async function getAdminDashboardStats(): Promise<AdminDashboardData> {
            totalPrograms, 
            pendingApprovals: 0, 
            collectionRate, 
-           attendanceTrend, 
+           attendanceTrend: finalAttendanceTrend, 
            recentLogins, 
            studentDistribution 
         };
@@ -506,18 +527,20 @@ export async function getEmployeeDashboardStats(profileId: string): Promise<Empl
          result.pendingFees = total - collected;
          result.collectionRate = total > 0 ? Math.round((collected / total) * 100) : 0;
     } else if (employeeType === 'hostel_management') {
-         const { data: rooms } = await supabase.from('hostel_rooms').select('capacity, occupied');
-         let totalBeds = 0; let occupiedBeds = 0; let totalRoomsCount = rooms?.length || 0;
+         const { data: rooms } = await supabase.from('hostel_rooms').select('capacity, hostel_allocations(id)');
+         let totalBeds = 0; let totalRoomsCount = rooms?.length || 0;
          rooms?.forEach(r => {
              totalBeds += r.capacity || 0;
-             occupiedBeds += r.occupied || 0;
          });
-         const { count: students } = await supabase.from('students').select('*', { count: 'exact', head: true }).not('hostel_roomId', 'is', null);
+         // BUG FIX #13: was querying non-existent students.hostel_roomId. Count from hostel_allocations instead.
+         const { count: allocatedStudents } = await supabase.from('hostel_allocations').select('*', { count: 'exact', head: true });
+         const occupiedBeds = allocatedStudents || 0;
          result.totalRooms = totalRoomsCount;
          result.occupiedRooms = occupiedBeds;
-         result.availableRooms = totalBeds - occupiedBeds;
-         result.totalHostelStudents = students || occupiedBeds;
+         result.availableRooms = Math.max(0, totalBeds - occupiedBeds);
+         result.totalHostelStudents = occupiedBeds;
     } else if (employeeType === 'exam_marks_management') {
+         // BUG FIX #14: align table names — 'exams' for schedule count, 'exam_marks' for marks entered
          const [examsRes, classesRes, coursesRes, marksRes] = await Promise.all([
              supabase.from('exams').select('id, status', { count: 'exact' }),
              supabase.from('classes').select('*', { count: 'exact', head: true }),

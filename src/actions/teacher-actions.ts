@@ -309,5 +309,48 @@ export interface TeacherClassWithStudents {
     classInfo: { id: string; courseCode: string; courseName: string; class: string; };
     students: any[];
 }
-export async function getStudentsByClassForTeacher(teacherProfileId: string): Promise<TeacherClassWithStudents[]> { return []; }
+
+// BUG FIX #10: Implement getStudentsByClassForTeacher (was stub always returning [])
+export async function getStudentsByClassForTeacher(teacherProfileId: string): Promise<TeacherClassWithStudents[]> {
+    const supabase = await createServerSupabaseClient();
+    const dbTeacherId = await resolveTeacherId(supabase, teacherProfileId);
+    if (!dbTeacherId) return [];
+
+    const { data: classes, error } = await supabase
+        .from('classes')
+        .select('id, program, branch, semester, section, courses(id, name, code)')
+        .eq('teacher_id', dbTeacherId);
+
+    if (error || !classes) return [];
+
+    const result: TeacherClassWithStudents[] = [];
+    for (const c of classes as any[]) {
+        const course = Array.isArray(c.courses) ? c.courses[0] : c.courses;
+        const { data: studentRecords } = await supabase
+            .from('students')
+            .select('id, college_id, profiles(full_name, email)')
+            .eq('program', c.program)
+            .eq('branch', c.branch)
+            .eq('current_semester', c.semester)
+            .eq('section', c.section || 'A')
+            .eq('is_graduated', false)
+            .order('college_id');
+
+        result.push({
+            classInfo: {
+                id: c.id,
+                courseCode: course?.code || '',
+                courseName: course?.name || '',
+                class: `${c.program || ''} ${c.branch || ''} ${c.section || ''}`.trim(),
+            },
+            students: (studentRecords || []).map((s: any) => ({
+                id: s.id,
+                name: s.profiles?.full_name || 'Unknown',
+                collegeId: s.college_id,
+                email: s.profiles?.email || '',
+            })),
+        });
+    }
+    return result;
+}
 

@@ -970,20 +970,11 @@ export async function getNotificationsSummary() {
 // ================================================================
 
 /**
- * Get timetable / schedule summary. File-based (src/data/timetable.json).
+ * Get timetable / schedule summary from Supabase timetables table.
  */
 export async function getTimetableSummary(filters: { branch?: string; semester?: number }) {
-  let timetable: any[] = [];
-  try {
-    // Timetable is file-based
-    const fs = await import('fs/promises');
-    const path = await import('path');
-    const filePath = path.join(process.cwd(), 'src', 'data', 'timetable.json');
-    const raw = await fs.readFile(filePath, 'utf-8');
-    timetable = JSON.parse(raw);
-  } catch {
-    return { totalSlots: 0, branch: filters.branch || 'All', semester: filters.semester || 'All', byDay: {} as Record<string, any[]>, status: 'no_data' };
-  }
+  // Query Supabase timetables joined with classes and courses
+  const timetable = await readCollection<any>('timetables');
 
   if (timetable.length === 0) {
     return { totalSlots: 0, branch: filters.branch || 'All', semester: filters.semester || 'All', byDay: {} as Record<string, any[]>, status: 'no_data' };
@@ -998,36 +989,23 @@ export async function getTimetableSummary(filters: { branch?: string; semester?:
     filtered = filtered.filter((s: any) => s.semester === filters.semester);
   }
 
-  // Enrich with course names
-  const courses = await readCollection<any>('courses');
-  const courseMap: Record<string, string> = {};
-  courses.forEach((c: any) => { courseMap[c.courseId] = c.courseName || c.name || c.courseId; });
-
-  const teachers = await readCollection<any>('teachers');
-  const teacherMap: Record<string, string> = {};
-  teachers.forEach((t: any) => { teacherMap[t.id] = t.name || 'Unknown'; });
-
   // Group by day
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const byDay: Record<string, any[]> = {};
   days.forEach(d => { byDay[d] = []; });
 
   filtered.forEach((slot: any) => {
-    const day = slot.day || 'Unknown';
+    const day = slot.day_of_week || slot.day || 'Unknown';
     if (!byDay[day]) byDay[day] = [];
     byDay[day].push({
-      period: slot.period,
-      courseId: slot.courseId,
-      courseName: courseMap[slot.courseId] || slot.courseId || 'N/A',
-      teacherName: teacherMap[slot.teacherId] || 'N/A',
+      period: slot.period || slot.start_time,
+      courseName: slot.course_name || slot.courses?.name || 'N/A',
+      teacherName: slot.teacher_name || 'N/A',
       section: slot.section || 'N/A',
+      startTime: slot.start_time || 'N/A',
+      endTime: slot.end_time || 'N/A',
     });
   });
-
-  // Sort periods within each day
-  for (const day of days) {
-    byDay[day].sort((a: any, b: any) => (a.period || 0) - (b.period || 0));
-  }
 
   return {
     totalSlots: filtered.length,

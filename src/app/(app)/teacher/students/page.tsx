@@ -1,15 +1,18 @@
-
 'use client';
 
 import * as React from 'react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { Users, Eye } from "lucide-react";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Button } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Users, Eye, Loader2, MoreHorizontal } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { getStudentsByClassForTeacher, type TeacherClassWithStudents } from '@/actions/teacher-actions';
-import { Button } from '@/components/ui/button';
+import { getSession } from '@/actions/auth-actions';
 
 export default function TeacherStudentsPage() {
   const { toast } = useToast();
@@ -17,33 +20,31 @@ export default function TeacherStudentsPage() {
   const [isLoading, setIsLoading] = React.useState(true);
 
   React.useEffect(() => {
-    const loadData = async () => {
+    (async () => {
       setIsLoading(true);
-      const storedUserString = localStorage.getItem('loggedInUser');
-      if (!storedUserString) {
-        toast({ variant: "destructive", title: "Error", description: "Could not identify teacher." });
-        setIsLoading(false);
-        return;
-      }
-      const user = JSON.parse(storedUserString);
       try {
-        const result = await getStudentsByClassForTeacher(user.uid);
-        setData(result);
-      } catch (error: any) {
-        toast({ variant: "destructive", title: "Error", description: "Failed to load student data." });
+        const session = await getSession();
+        const uid = session?.data?.profile?.id;
+        if (!uid) { toast({ variant: 'destructive', title: 'Error', description: 'Could not identify teacher.' }); return; }
+        setData(await getStudentsByClassForTeacher(uid));
+      } catch {
+        toast({ variant: 'destructive', title: 'Error', description: 'Failed to load student data.' });
       } finally {
         setIsLoading(false);
       }
-    };
-    loadData();
+    })();
   }, [toast]);
 
-  if (isLoading) {
-    return <div className="flex flex-col items-center justify-center py-12 gap-4" role="status"><div className="relative"><div className="h-12 w-12 rounded-full border-4 border-muted" /><div className="absolute inset-0 h-12 w-12 rounded-full border-4 border-primary border-t-transparent animate-spin" /></div><span className="text-sm font-medium text-muted-foreground">Loading...</span></div>;
-  }
+  if (isLoading) return (
+    <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
+      <Loader2 className="h-8 w-8 animate-spin" />
+      <span className="text-sm font-medium">Loading students…</span>
+    </div>
+  );
 
   return (
-    <div className="space-y-8 animate-fade-in">
+    <div className="space-y-6 animate-fade-in">
+      {/* Header */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 p-6 text-white shadow-lg">
         <div className="relative z-10">
           <h1 className="text-2xl font-bold tracking-tight">My Students</h1>
@@ -51,6 +52,7 @@ export default function TeacherStudentsPage() {
         </div>
         <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2" />
       </div>
+
       <Card className="card-elevated">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -59,59 +61,78 @@ export default function TeacherStudentsPage() {
             </div>
             Class Rosters
           </CardTitle>
-          <CardDescription>View the list of students enrolled in each of your classes. Click a name to view their profile.</CardDescription>
+          <CardDescription>Students enrolled in each of your classes.</CardDescription>
         </CardHeader>
         <CardContent>
           {data.length > 0 ? (
-            <Accordion type="single" collapsible className="w-full" defaultValue={data[0]?.classInfo.id}>
+            <Accordion type="single" collapsible className="w-full" defaultValue={data[0]?.classInfo?.id}>
               {data.map(({ classInfo, students }) => (
                 <AccordionItem key={classInfo?.id} value={classInfo?.id || ''}>
                   <AccordionTrigger>
-                    <div className="flex justify-between w-full pr-4">
-                      <span>{classInfo?.courseCode} - {classInfo?.courseName} ({classInfo?.class})</span>
-                      <span className="text-sm text-muted-foreground">{students?.length || 0} Students</span>
+                    <div className="flex justify-between w-full pr-4 items-center">
+                      <span className="font-medium">{classInfo?.courseCode} – {classInfo?.courseName} ({classInfo?.class})</span>
+                      <Badge variant="secondary" className="ml-4 text-xs font-medium">{students?.length || 0} students</Badge>
                     </div>
                   </AccordionTrigger>
                   <AccordionContent>
                     {students.length > 0 ? (
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pt-4 pb-2">
-                        {students.map(student => (
-                          <Card key={student.id} className="flex flex-col overflow-hidden hover:shadow-md transition-all duration-300 group relative bg-card border-border/50">
-                            <div className="px-4 py-4 flex flex-col items-center text-center">
-                               <Avatar className="h-16 w-16 mb-3 border-2 border-emerald-500/20">
-                                 <AvatarImage src={(student as any).avatarUrl} />
-                                 <AvatarFallback className="text-lg bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 font-bold">{student.name?.substring(0,2).toUpperCase()}</AvatarFallback>
-                               </Avatar>
-                               <h3 className="font-semibold text-base leading-tight truncate w-full group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors" title={student.name}>{student.name}</h3>
-                               <p className="text-xs font-mono text-muted-foreground mt-1 mb-3">{student.collegeId || student.id}</p>
-                               
-                               <div className="w-full grid grid-cols-1 gap-2 text-sm text-left bg-muted/30 rounded-lg p-2.5 mb-4">
-                                  <div className="flex justify-between">
-                                    <span className="text-muted-foreground text-xs">Section</span>
-                                    <span className="font-medium text-xs truncate max-w-[100px]">{student.section || '—'}</span>
+                      <div className="overflow-x-auto rounded-lg border border-border/30">
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="border-border/40 hover:bg-transparent bg-muted/30">
+                              <TableHead className="w-10 pl-4">#</TableHead>
+                              <TableHead>Student</TableHead>
+                              <TableHead>USN</TableHead>
+                              <TableHead>Section</TableHead>
+                              <TableHead className="text-right pr-4">Profile</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {students.map((student, idx) => (
+                              <TableRow key={student.id} className="border-border/20 hover:bg-muted/30 transition-colors group">
+                                <TableCell className="pl-4 text-xs text-muted-foreground tabular-nums">{idx + 1}</TableCell>
+                                <TableCell className="min-w-[160px]">
+                                  <div className="flex items-center gap-3">
+                                    <Avatar className="h-7 w-7 flex-shrink-0 border border-border/50">
+                                      <AvatarImage src={(student as any).avatarUrl} />
+                                      <AvatarFallback className="text-xs font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                                        {student.name?.slice(0, 2).toUpperCase() ?? '??'}
+                                      </AvatarFallback>
+                                    </Avatar>
+                                    <span className="font-medium text-sm group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
+                                      {student.name || '—'}
+                                    </span>
                                   </div>
-                               </div>
-                               
-                               <Button 
-                                 asChild 
-                                 variant="default" 
-                                 size="sm" 
-                                 className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
-                               >
-                                 <Link href={`/teacher/students/${student.id}`}>
-                                   <Eye className="h-4 w-4" /> View Profile
-                                 </Link>
-                               </Button>
-                            </div>
-                          </Card>
-                        ))}
+                                </TableCell>
+                                <TableCell className="font-mono text-xs text-muted-foreground">
+                                  {student.collegeId || student.id}
+                                </TableCell>
+                                <TableCell className="text-sm font-medium">{student.section || '—'}</TableCell>
+                                <TableCell className="text-right pr-4">
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs font-medium">
+                                        View Student <MoreHorizontal className="h-3.5 w-3.5 opacity-60" />
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end" className="w-40">
+                                      <DropdownMenuItem className="gap-2 cursor-pointer" asChild>
+                                        <Link href={`/teacher/students/${student.id}`}>
+                                          <Eye className="h-4 w-4" /> View Profile
+                                        </Link>
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
                       </div>
                     ) : (
-                      <div className="flex flex-col items-center justify-center py-8 gap-4">
-                        <div className="h-12 w-12 rounded-2xl bg-muted flex items-center justify-center">
-                          <Users className="h-6 w-6 text-muted-foreground" />
-                        </div>
-                        <p className="text-sm text-muted-foreground">No students are enrolled in this class.</p>
+                      <div className="flex flex-col items-center justify-center py-8 gap-3 text-muted-foreground">
+                        <Users className="h-8 w-8 opacity-30" />
+                        <p className="text-sm">No students are enrolled in this class.</p>
                       </div>
                     )}
                   </AccordionContent>
@@ -119,11 +140,9 @@ export default function TeacherStudentsPage() {
               ))}
             </Accordion>
           ) : (
-            <div className="flex flex-col items-center justify-center py-12 gap-4">
-              <div className="h-12 w-12 rounded-2xl bg-muted flex items-center justify-center">
-                <Users className="h-6 w-6 text-muted-foreground" />
-              </div>
-              <p className="text-sm text-muted-foreground">You are not assigned to any classes.</p>
+            <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
+              <Users className="h-10 w-10 opacity-30" />
+              <p className="text-sm">You are not assigned to any classes.</p>
             </div>
           )}
         </CardContent>

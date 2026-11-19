@@ -29,7 +29,7 @@ export async function getMarksRecords(program?: string, branch?: string, semeste
         return { success: true, data: [] };
     }
 
-    const { data: classRec } = await supabase.from('classes').select('id, course_id').eq('semester', semester).eq('section', section).limit(1);
+    // BUG FIX #29: removed the dead classRec query that was fetched but never used
     const { data: studentsList } = await supabase.from('students').select('*, profiles(*)').eq('program', program).eq('branch', branch).eq('current_semester', semester);
     
     if (!studentsList) return { success: true, data: [] };
@@ -95,19 +95,21 @@ export async function saveAllMarksForClass(program: string, branch: string, seme
         exam = newExam;
     }
 
-    const { error: delErr } = await supabase.from('exam_marks').delete().eq('exam_id', exam.id);
-
-    const inserts = records.map(r => ({
+    // BUG FIX #12: was delete-then-insert which risks data loss on partial failure.
+    // Use upsert with conflict on (exam_id, student_id) to prevent data loss.
+    const upserts = records.map(r => ({
         exam_id: exam.id,
         student_id: r.studentId,
         marks_obtained: r.status === 'Present' && r.marks !== '' ? Number(r.marks) : null,
         status: r.status
     }));
 
-    const { error: insErr } = await supabase.from('exam_marks').insert(inserts);
+    const { error: upsertErr } = await supabase
+        .from('exam_marks')
+        .upsert(upserts, { onConflict: 'exam_id,student_id' });
 
-    if (insErr) {
-        return { success: false, error: insErr.message };
+    if (upsertErr) {
+        return { success: false, error: upsertErr.message };
     }
 
     return { success: true, message: 'Marks successfully saved.' };

@@ -38,6 +38,7 @@ const collectionMap: Record<string, string> = {
   classroom_posts: 'classroom_posts',
   classroom_assignments: 'classroom_assignments',
   classroom_submissions: 'classroom_submissions',
+  timetables: 'timetables',
 };
 
 // Tables that may not exist yet – silently return [] instead of logging errors

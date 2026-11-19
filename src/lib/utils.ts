@@ -27,7 +27,7 @@ export function formatDate(dateString: string | undefined | null, options?: Intl
     const defaultOptions: Intl.DateTimeFormatOptions = {
       year: 'numeric', month: 'short', day: 'numeric',
     };
-    // Handles both ISO strings and Firestore Timestamp-like objects
+    // Handles both ISO strings and legacy timestamp-like objects
     const date = new Date(typeof dateString === 'string' ? dateString : (dateString as any).toDate());
     if (isNaN(date.getTime())) {
       return "Invalid Date";

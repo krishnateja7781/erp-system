@@ -73,7 +73,9 @@ export async function createClass(payload: ClassPayload): Promise<ActionResult> 
 export async function getClassesWithDetails(): Promise<any[]> {
     try {
         const supabase = await createServerSupabaseClient();
-        
+
+        // Step 1: Fetch core class data WITHOUT the classrooms join
+        // (classroom_id column may not exist yet if migration hasn't been run)
         const { data: classesData, error } = await supabase.from('classes').select(`
             *,
             courses (code, name, program, branch, credits),
@@ -96,7 +98,8 @@ export async function getClassesWithDetails(): Promise<any[]> {
                 teacherId: c.teachers?.profile_id,
                 teacherName: c.teachers?.profiles?.full_name || 'N/A',
                 studentCount: 0,
-                classroomId: null,
+                classroomId: c.classroom_id || null,
+                classroomName: null as string | null,
             };
         }).sort((a: any, b: any) => {
             if (a.program !== b.program) return (a.program || '').localeCompare(b.program || '');
@@ -104,22 +107,80 @@ export async function getClassesWithDetails(): Promise<any[]> {
             return (a.section || '').localeCompare(b.section || '');
         });
 
+        // Step 2: Fetch student counts
         const { data: students } = await supabase.from('students').select('program, branch, current_year, current_semester');
         if (students) {
            uiClasses.forEach(c => {
-               const matchingStudents = students.filter(s => 
-                   s.program === c.program && 
-                   s.branch === c.branch && 
-                   s.current_year.toString() === c.year && 
+               const matchingStudents = students.filter(s =>
+                   s.program === c.program &&
+                   s.branch === c.branch &&
+                   s.current_year.toString() === c.year &&
                    s.current_semester === c.semester
                );
                c.studentCount = matchingStudents.length;
            });
         }
 
+        // Step 3: Separately resolve classroom names for rows that have a classroom_id
+        // This is a separate query so it doesn't break the main fetch if classroom_id column is missing
+        const linkedIds = uiClasses.map(c => c.classroomId).filter(Boolean) as string[];
+        if (linkedIds.length > 0) {
+            try {
+                const { data: classroomRows } = await supabase
+                    .from('classrooms')
+                    .select('id, name')
+                    .in('id', linkedIds);
+                if (classroomRows) {
+                    const nameMap = Object.fromEntries(classroomRows.map((r: any) => [r.id, r.name]));
+                    uiClasses.forEach(c => {
+                        if (c.classroomId) c.classroomName = nameMap[c.classroomId] || null;
+                    });
+                }
+            } catch {
+                // Classroom name lookup is non-critical — swallow silently
+            }
+        }
+
         return uiClasses;
     } catch {
         throw new Error('Failed to load class data.');
+    }
+}
+
+
+export async function getAllClassrooms(): Promise<{ id: string; name: string; subject: string; section: string }[]> {
+    try {
+        const supabase = await createServerSupabaseClient();
+        const { data, error } = await supabase
+            .from('classrooms')
+            .select('id, name, subject, section')
+            .order('name', { ascending: true });
+        if (error || !data) return [];
+        return data.map((c: any) => ({ id: c.id, name: c.name || '', subject: c.subject || '', section: c.section || '' }));
+    } catch { return []; }
+}
+
+export async function linkClassroomToClass(classId: string, classroomId: string): Promise<ActionResult> {
+    if (!classId || !classroomId) return { success: false, error: 'Class ID and Classroom ID are required.' };
+    try {
+        const supabase = await createServerSupabaseClient();
+        const { error } = await supabase.from('classes').update({ classroom_id: classroomId }).eq('id', classId);
+        if (error) return { success: false, error: error.message };
+        return { success: true, message: 'Classroom linked successfully.' };
+    } catch (e: any) {
+        return { success: false, error: e.message || 'Failed to link classroom.' };
+    }
+}
+
+export async function unlinkClassroomFromClass(classId: string): Promise<ActionResult> {
+    if (!classId) return { success: false, error: 'Class ID is required.' };
+    try {
+        const supabase = await createServerSupabaseClient();
+        const { error } = await supabase.from('classes').update({ classroom_id: null }).eq('id', classId);
+        if (error) return { success: false, error: error.message };
+        return { success: true, message: 'Classroom unlinked successfully.' };
+    } catch (e: any) {
+        return { success: false, error: e.message || 'Failed to unlink classroom.' };
     }
 }
 

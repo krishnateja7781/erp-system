@@ -9,9 +9,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit",
-    "seed:admin": "tsx src/lib/seed-admin.ts",
-    "seed:fees": "tsx src/lib/seed-fee-record.ts"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@genkit-ai/googleai": "~1.28.0",
@@ -35,13 +33,11 @@
     "@radix-ui/react-tooltip": "^1.1.8",
     "@supabase/ssr": "^0.9.0",
     "@supabase/supabase-js": "^2.99.3",
-    "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "geist": "^1.3.1",
     "genkit": "~1.29.0",
     "html2canvas": "^1.4.1",
-    "iron-session": "^8.0.4",
     "jspdf": "^4.2.0",
     "lucide-react": "^0.475.0",
     "next": "^16.1.6",
@@ -55,7 +51,6 @@
     "zod": "^3.24.2"
   },
   "devDependencies": {
-    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

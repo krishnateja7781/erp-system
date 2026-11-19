@@ -1,8 +1,11 @@
 'use server'
-import { createServerSupabaseClient } from '@/lib/supabase'
+// BUG FIX #32: createNotification uses service role to bypass RLS for server-initiated notifications
+// getNotifications / markRead use anon client since they run in authenticated user context
+import { createServerSupabaseClient, createServiceRoleClient } from '@/lib/supabase'
 
 export async function createNotification(userId: string, title: string, message: string, type: string) { 
-  const supabase = await createServerSupabaseClient();
+  // Service role bypasses RLS \u2014 required when server creates notifications for a target user
+  const supabase = await createServiceRoleClient();
   const { error } = await supabase.from('notifications').insert({ user_id: userId, title, message, type });
   if (error) return { success: false, error: error.message };
   return { success: true };

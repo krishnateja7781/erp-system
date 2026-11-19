@@ -19,6 +19,7 @@ import { Search, X, Loader2 } from "lucide-react";
 import Link from 'next/link';
 import type { ClassUI } from '@/app/(app)/admin/classes/page';
 import { PageHeaderActions } from '@/components/layout/layout-context';
+import { ClassroomSummaryDialog } from '@/components/admin/classes/classroom-summary-dialog';
 
 const programs = ["All", "B.Tech", "MBA", "Law", "MBBS", "B.Sc", "B.Com"];
 const years = ["All", "1", "2", "3", "4", "5"];
@@ -39,6 +40,8 @@ export default function EmployeeClassesPage() {
     const [isAddDialogOpen, setIsAddDialogOpen] = React.useState(false);
     const [isEditDialogOpen, setIsEditDialogOpen] = React.useState(false);
     const [selectedClassForEdit, setSelectedClassForEdit] = React.useState<ClassUI | null>(null);
+    const [isSummaryOpen, setIsSummaryOpen] = React.useState(false);
+    const [summaryTarget, setSummaryTarget] = React.useState<{ classroomId: string; classroomName: string; courseName: string; section: string } | null>(null);
     const { toast } = useToast();
 
     const [filterProgram, setFilterProgram] = React.useState("All");
@@ -75,6 +78,17 @@ export default function EmployeeClassesPage() {
     const handleOpenEditDialog = (cls: ClassUI) => {
         setSelectedClassForEdit(cls);
         setIsEditDialogOpen(true);
+    };
+
+    const handleViewClassroom = (cls: ClassUI) => {
+        if (!cls.classroomId) return;
+        setSummaryTarget({
+            classroomId: cls.classroomId,
+            classroomName: (cls as any).classroomName || 'Linked Classroom',
+            courseName: cls.courseName,
+            section: cls.section,
+        });
+        setIsSummaryOpen(true);
     };
 
     const resetFilters = () => {
@@ -228,9 +242,17 @@ export default function EmployeeClassesPage() {
                                         </TableCell>
                                         <TableCell>
                                             {cls.classroomId ? (
-                                                <Button variant="outline" size="sm" asChild className="gap-2">
-                                                    <Link href={`/classrooms/${cls.classroomId}`}><Link2 className="h-3 w-3" />View</Link>
-                                                </Button>
+                                                <div className="flex items-center gap-2">
+                                                    <div className="flex items-center gap-1.5 min-w-0">
+                                                        <Link2 className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0" />
+                                                        <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400 truncate max-w-[120px]" title={(cls as any).classroomName || undefined}>
+                                                            {(cls as any).classroomName || 'Linked'}
+                                                        </span>
+                                                    </div>
+                                                    <Button variant="outline" size="sm" className="gap-1 h-7 px-2 text-xs flex-shrink-0" onClick={() => handleViewClassroom(cls)}>
+                                                        View
+                                                    </Button>
+                                                </div>
                                             ) : (
                                                 <Badge variant="outline" className="text-muted-foreground">Not Linked</Badge>
                                             )}
@@ -279,6 +301,11 @@ export default function EmployeeClassesPage() {
                 onTeacherUpdated={loadData}
                 classData={{ classId: selectedClassForEdit.id, className: selectedClassForEdit.courseName, program: selectedClassForEdit.program, currentTeacherId: selectedClassForEdit.teacherId }}
             />}
+            <ClassroomSummaryDialog
+                isOpen={isSummaryOpen}
+                onOpenChange={setIsSummaryOpen}
+                data={summaryTarget}
+            />
         </div>
     );
 }

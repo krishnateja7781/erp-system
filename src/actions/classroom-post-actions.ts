@@ -149,8 +149,11 @@ export async function createAssignment(
   if (!title.trim()) return { success: false, error: 'Assignment title is required.' };
 
   const supabase = await createServerSupabaseClient();
+  // BUG FIX #22: was not saving author_id / author_name — teacher identity was lost on create
   const { error } = await supabase.from('classroom_assignments').insert({
     classroom_id: classroomId,
+    author_id: teacherId,
+    author_name: teacherName,
     title: title.trim(),
     description: description.trim(),
     due_date: dueDate || null,
@@ -200,9 +203,16 @@ export async function submitAssignment(
     .maybeSingle();
 
   if (existing) {
+    // BUG FIX #23: also update file fields when re-submitting with a different file
     const { error } = await supabase
       .from('classroom_submissions')
-      .update({ content: content.trim(), status: 'Submitted' })
+      .update({ 
+        content: content.trim(), 
+        status: 'Submitted',
+        file_name: fileName || null,
+        file_url: fileUrl || null,
+        submitted_at: new Date().toISOString(),
+      })
       .eq('id', existing.id);
     if (error) return { success: false, error: error.message };
     return { success: true, message: 'Submission updated.' };

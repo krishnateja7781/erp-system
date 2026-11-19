@@ -19,7 +19,11 @@ export async function getOpportunities(typeFilter?: 'placement' | 'internship'):
         description: o.description || 'Opportunity details.',
         eligibility: `B.Tech / M.Tech`,
         minCgpa: o.eligibility_cgpa || 7.0,
-        skills: ['Java', 'React', 'SQL', 'Python'].sort(() => 0.5 - Math.random()).slice(0, 3),
+        // BUG FIX #16: was randomly shuffling hardcoded skills on every call.
+        // Now reads from DB skills column; falls back to static list only as last resort.
+        skills: Array.isArray(o.skills) && o.skills.length > 0
+            ? o.skills
+            : (o.required_skills ? o.required_skills.split(',').map((s: string) => s.trim()) : ['Technical Skills']),
         deadline: o.deadline,
         status: o.status || 'Open',
         duration: o.type === 'internship' ? '6 Months' : undefined,

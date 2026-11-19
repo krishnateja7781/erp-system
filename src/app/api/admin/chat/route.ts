@@ -1,10 +1,10 @@
 // ============================================================
 // Admin Chatbot API Route — POST /api/admin/chat
-// Auth: iron-session, role must be 'super_admin'
+// Auth: Supabase JWT session, role must be 'super_admin'
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getCurrentUser } from '@/lib/auth-session';
+import { getSession } from '@/actions/auth-actions';
 import { detectAdminIntent, extractSearchTerm, extractHostelName, extractBranch, extractYear, extractSemester, extractCourseName } from '@/chatbots/admin/intent';
 import * as svc from '@/chatbots/admin/service';
 import * as fmt from '@/chatbots/admin/formatter';
@@ -14,8 +14,11 @@ const MAX_MESSAGE_LENGTH = 300;
 
 export async function POST(request: NextRequest) {
   try {
-    // ── Auth ──
-    const user = await getCurrentUser();
+    // ── Auth (Supabase JWT) ──
+    const sessionResult = await getSession();
+    const profile = sessionResult?.data?.profile;
+    const user = profile ? { name: profile.full_name || 'Admin', email: profile.email, role: profile.role } : null;
+
     if (!user) {
       return NextResponse.json<ChatError>(
         { success: false, role: 'super_admin', intent: 'Error', message: 'Please log in to use the chatbot.', metadata: {} },

@@ -1,14 +1,15 @@
 'use client';
 
 import * as React from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Search, GraduationCap, Loader2, Eye, AlertTriangle } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Search, GraduationCap, Loader2, Eye, MoreHorizontal } from "lucide-react";
 import { getStudents } from '@/actions/student-actions';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
@@ -25,20 +26,14 @@ export default function EmployeeStudentsPage() {
 
   const effectRan = React.useRef(false);
   React.useEffect(() => {
-    async function load() {
-      setIsLoading(true);
-      try {
-        const data = await getStudents();
-        setStudents(data);
-      } catch (e: any) {
-        toast({ variant: 'destructive', title: 'Error', description: 'Failed to load students.' });
-      } finally {
-        setIsLoading(false);
-      }
-    }
     if (!effectRan.current) {
-        load();
-        effectRan.current = true;
+      effectRan.current = true;
+      (async () => {
+        setIsLoading(true);
+        try { setStudents(await getStudents()); }
+        catch { toast({ variant: 'destructive', title: 'Error', description: 'Failed to load students.' }); }
+        finally { setIsLoading(false); }
+      })();
     }
   }, []);
 
@@ -47,60 +42,49 @@ export default function EmployeeStudentsPage() {
 
   const filtered = React.useMemo(() => {
     const q = search.toLowerCase();
-    return students.filter(s => {
-      const searchMatch = !search || s.name?.toLowerCase().includes(q) || s.collegeId?.toLowerCase().includes(q) || s.email?.toLowerCase().includes(q);
-      const programMatch = programFilter === 'all' || s.program === programFilter;
-      const branchMatch = branchFilter === 'all' || s.branch === branchFilter;
-      const typeMatch = typeFilter === 'all' || s.type === typeFilter;
-      return searchMatch && programMatch && branchMatch && typeMatch;
-    });
+    return students.filter(s =>
+      (!search || s.name?.toLowerCase().includes(q) || s.collegeId?.toLowerCase().includes(q) || s.email?.toLowerCase().includes(q))
+      && (programFilter === 'all' || s.program === programFilter)
+      && (branchFilter === 'all' || s.branch === branchFilter)
+      && (typeFilter === 'all' || s.type === typeFilter)
+    );
   }, [students, search, programFilter, branchFilter, typeFilter]);
+
+  const getStatusBadge = (status?: string) => {
+    switch ((status || '').toLowerCase()) {
+      case 'active':   return <Badge className="bg-emerald-500/15 text-emerald-600 border-emerald-500/30 border">Active</Badge>;
+      case 'inactive': return <Badge className="bg-slate-500/15 text-slate-500 border-slate-400/30 border">Inactive</Badge>;
+      default:         return <Badge variant="outline">{status || 'N/A'}</Badge>;
+    }
+  };
 
   return (
     <div className="space-y-6 animate-fade-in max-w-7xl mx-auto">
-      {/* Hero */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 via-blue-500 to-indigo-600 p-8 text-white shadow-xl">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Students Directory</h1>
-            <p className="text-white/80 text-sm mt-2">Browse and view all enrolled students across all programs.</p>
-            <div className="mt-3 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 text-xs font-medium">
-              <GraduationCap className="h-3.5 w-3.5" />
-              {students.length} Total Students
-            </div>
-          </div>
-          <GraduationCap className="h-20 w-20 opacity-10" />
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 via-blue-500 to-indigo-600 p-6 text-white shadow-xl">
+        <div className="relative z-10">
+          <h1 className="text-2xl font-bold tracking-tight">Students Directory</h1>
+          <p className="text-white/70 text-sm mt-1">{students.length} total students enrolled</p>
         </div>
-        <div className="absolute -top-8 -right-8 w-40 h-40 bg-white/5 rounded-full blur-2xl" />
+        <div className="absolute -top-6 -right-6 w-32 h-32 bg-white/5 rounded-full blur-2xl" />
       </div>
 
-      {/* Filters */}
       <Card className="card-elevated">
-        <CardContent className="pt-5 pb-4">
-          <div className="flex flex-col md:flex-row gap-3 items-end">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search by name, ID, or email..."
-                className="pl-9"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-              />
+        <CardHeader className="pb-0 pt-4">
+          <div className="flex flex-wrap gap-3">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input placeholder="Search by name, ID or email…" className="pl-8" value={search} onChange={e => setSearch(e.target.value)} />
             </div>
             <Select value={programFilter} onValueChange={setProgramFilter}>
-              <SelectTrigger className="w-[150px]"><SelectValue placeholder="Program" /></SelectTrigger>
-              <SelectContent>
-                {programs.map(p => <SelectItem key={p} value={p}>{p === 'all' ? 'All Programs' : p}</SelectItem>)}
-              </SelectContent>
+              <SelectTrigger className="w-[150px]"><SelectValue placeholder="All Programs" /></SelectTrigger>
+              <SelectContent>{programs.map(p => <SelectItem key={p} value={p}>{p === 'all' ? 'All Programs' : p}</SelectItem>)}</SelectContent>
             </Select>
             <Select value={branchFilter} onValueChange={setBranchFilter}>
-              <SelectTrigger className="w-[150px]"><SelectValue placeholder="Branch" /></SelectTrigger>
-              <SelectContent>
-                {branches.map(b => <SelectItem key={b} value={b}>{b === 'all' ? 'All Branches' : b}</SelectItem>)}
-              </SelectContent>
+              <SelectTrigger className="w-[150px]"><SelectValue placeholder="All Branches" /></SelectTrigger>
+              <SelectContent>{branches.map(b => <SelectItem key={b} value={b}>{b === 'all' ? 'All Branches' : b}</SelectItem>)}</SelectContent>
             </Select>
             <Select value={typeFilter} onValueChange={setTypeFilter}>
-              <SelectTrigger className="w-[160px]"><SelectValue placeholder="Type" /></SelectTrigger>
+              <SelectTrigger className="w-[150px]"><SelectValue placeholder="All Types" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Types</SelectItem>
                 <SelectItem value="Hosteler">Hosteler</SelectItem>
@@ -108,84 +92,85 @@ export default function EmployeeStudentsPage() {
               </SelectContent>
             </Select>
           </div>
-        </CardContent>
-      </Card>
-
-      {/* Table */}
-      <Card className="card-elevated">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">
-            {isLoading ? 'Loading...' : `${filtered.length} student${filtered.length !== 1 ? 's' : ''} found`}
-          </CardTitle>
-          <CardDescription>Click "View Profile" to see full student details.</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-4 px-0">
           {isLoading ? (
-            <div className="flex flex-col items-center justify-center py-20 text-muted-foreground w-full">
-              <Loader2 className="h-8 w-8 animate-spin mb-4" />
-              <p>Loading records...</p>
+            <div className="flex flex-col items-center justify-center py-24 text-muted-foreground">
+              <Loader2 className="h-8 w-8 animate-spin mb-3" /><p className="text-sm">Loading students…</p>
             </div>
           ) : filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 text-muted-foreground w-full border-2 border-dashed rounded-xl">
-              <GraduationCap className="h-12 w-12 text-muted-foreground/50 mb-3" />
-              <p className="font-medium">No students found.</p>
-              <p className="text-sm">Try adjusting your search criteria.</p>
+            <div className="flex flex-col items-center justify-center py-20 text-muted-foreground border-2 border-dashed rounded-xl mx-4 mb-2">
+              <GraduationCap className="h-12 w-12 opacity-30 mb-2" />
+              <p className="font-medium">No students found</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pt-2">
-              {filtered.map(s => (
-                <Card key={s.id} className="flex flex-col overflow-hidden hover:shadow-xl hover:-translate-y-1 transition-all duration-300 card-elevated group relative bg-card/60 backdrop-blur-sm border-border/50">
-                  <div className="h-24 bg-gradient-to-br from-blue-500 via-indigo-500 to-violet-600 relative overflow-hidden">
-                    <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity" />
-                    <div className="absolute -bottom-10 -right-10 w-32 h-32 bg-white/10 rounded-full blur-2xl" />
-                  </div>
-                  <div className="px-5 pt-0 pb-5 flex-1 flex flex-col">
-                    <div className="-mt-12 mb-3 flex justify-between items-end relative z-10">
-                       <Avatar className="h-20 w-20 border-4 border-background shadow-md bg-muted">
-                         <AvatarImage src={s.avatarUrl} />
-                         <AvatarFallback className="text-xl font-bold">{s.name?.substring(0,2).toUpperCase()}</AvatarFallback>
-                       </Avatar>
-                       <Badge variant="outline" className={`bg-background/80 backdrop-blur-sm border shadow-sm ${s.type === 'Hosteler' ? 'border-blue-300 text-blue-700 dark:text-blue-300 dark:border-blue-800' : ''}`}>
-                         {s.type}
-                       </Badge>
-                    </div>
-                    <h3 className="font-bold text-lg leading-tight truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors" title={s.name}>{s.name}</h3>
-                    <p className="text-sm font-mono text-muted-foreground mb-4">{s.collegeId}</p>
-                    
-                    <div className="grid grid-cols-2 gap-y-3 gap-x-2 text-sm mt-1 mb-5 flex-1">
-                       <div className="flex flex-col">
-                         <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground/70">Program</span>
-                         <span className="font-medium truncate">{s.program}</span>
-                       </div>
-                       <div className="flex flex-col">
-                         <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground/70">Branch</span>
-                         <span className="font-medium truncate">{s.branch || '—'}</span>
-                       </div>
-                       <div className="flex flex-col">
-                         <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground/70">Year</span>
-                         <span className="font-medium">Year {s.year}</span>
-                       </div>
-                       <div className="flex flex-col">
-                         <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground/70">Status</span>
-                         <span className="font-medium flex items-center gap-1.5 flex-wrap"><div className={`w-1.5 h-1.5 rounded-full ${s.status === 'Active' ? 'bg-green-500' : 'bg-gray-500'}`} />{s.status}</span>
-                       </div>
-                    </div>
-                    
-                    <div className="flex flex-col gap-2 mt-auto pt-4 border-t border-border/50">
-                       <Button 
-                         className="w-full gap-2 bg-blue-50/50 hover:bg-blue-100 text-blue-700 border border-blue-200 dark:bg-blue-950/30 dark:hover:bg-blue-900/50 dark:text-blue-300 dark:border-blue-800" 
-                         variant="secondary"
-                         onClick={() => router.push(`/admin/students/${s.id}`)}
-                       >
-                         <Eye className="h-4 w-4" /> View Profile
-                       </Button>
-                    </div>
-                  </div>
-                </Card>
-              ))}
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-border/40 hover:bg-transparent">
+                    <TableHead className="w-10 pl-6">#</TableHead>
+                    <TableHead>Student</TableHead>
+                    <TableHead>USN</TableHead>
+                    <TableHead>Program</TableHead>
+                    <TableHead>Branch</TableHead>
+                    <TableHead>Year</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right pr-4">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filtered.map((s, idx) => (
+                    <TableRow key={s.id} className="border-border/30 hover:bg-muted/40 transition-colors group">
+                      <TableCell className="pl-6 text-xs text-muted-foreground tabular-nums">{idx + 1}</TableCell>
+                      <TableCell className="min-w-[180px]">
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-8 w-8 flex-shrink-0 border border-border/50">
+                            <AvatarImage src={s.avatarUrl} />
+                            <AvatarFallback className="text-xs font-semibold bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                              {s.name?.slice(0, 2).toUpperCase() ?? '??'}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0">
+                            <p className="font-medium text-sm truncate group-hover:text-blue-600 transition-colors">{s.name || '—'}</p>
+                            {s.email && <p className="text-xs text-muted-foreground truncate">{s.email}</p>}
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">{s.collegeId || '—'}</TableCell>
+                      <TableCell className="text-sm">{s.program || '—'}</TableCell>
+                      <TableCell>
+                        {s.branch ? <Badge variant="outline" className="text-xs border-blue-300/50 text-blue-700 dark:text-blue-300 bg-blue-50/50 dark:bg-blue-950/30">{s.branch}</Badge> : '—'}
+                      </TableCell>
+                      <TableCell className="text-sm text-center">
+                        {s.year ? <span className="inline-flex items-center justify-center h-6 w-6 rounded-full bg-muted text-xs font-semibold">{s.year}</span> : '—'}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{s.type || '—'}</TableCell>
+                      <TableCell>{getStatusBadge(s.status)}</TableCell>
+                      <TableCell className="text-right pr-4">
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs font-medium">
+                              View Student <MoreHorizontal className="h-3.5 w-3.5 opacity-60" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-40">
+                            <DropdownMenuItem className="gap-2 cursor-pointer" onClick={() => router.push(`/admin/students/${s.id}`)}>
+                              <Eye className="h-4 w-4" /> View Profile
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
           )}
         </CardContent>
+        <CardFooter className="border-t border-border/30 pt-3 pb-3 px-6">
+          <p className="text-xs text-muted-foreground">Showing <strong>{filtered.length}</strong> of <strong>{students.length}</strong> students</p>
+        </CardFooter>
       </Card>
     </div>
   );

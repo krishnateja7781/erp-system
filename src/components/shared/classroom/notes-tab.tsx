@@ -1,7 +1,6 @@
 'use client';
 
 import * as React from 'react';
-import { supabase } from '@/lib/supabase-client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -74,28 +73,13 @@ export function NotesTab({ classroomId, userId, userName, userRole }: NotesTabPr
     loadNotes().finally(() => setIsLoading(false));
   }, [loadNotes]);
 
-  // Polling — uses direct Supabase client reads (not server actions)
+  // Light background refresh while the tab is visible.
   React.useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        const { data } = await supabase
-          .from('classroom_notes')
-          .select('*')
-          .eq('classroomId', classroomId)
-          .order('createdAt', { ascending: false });
-        if (!data) return;
-        setNotes((prev) => {
-          const prevIds = prev.map((n) => n.id).join(',');
-          const newIds = data.map((n: any) => n.id).join(',');
-          if (prevIds === newIds) return prev;
-          return data as ClassroomNote[];
-        });
-      } catch {
-        // Silently ignore polling errors
-      }
-    }, 5000);
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') loadNotes().catch(() => {});
+    }, 30000);
     return () => clearInterval(interval);
-  }, [classroomId]);
+  }, [loadNotes]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

@@ -53,6 +53,7 @@ export function StreamTab({ classroomId, userId, userName, userRole }: StreamTab
   // Ref to track latest posts for polling comparison
   const postsRef = React.useRef<ClassroomPost[]>([]);
   postsRef.current = posts;
+  const realtimeLiveRef = React.useRef(false);
 
   const loadPosts = React.useCallback(async () => {
     try {
@@ -81,7 +82,7 @@ export function StreamTab({ classroomId, userId, userName, userRole }: StreamTab
           table: 'classroom_posts',
           filter: `classroom_id=eq.${classroomId}`,
         },
-        (payload) => {
+        (payload: { new: Record<string, any>; old: Record<string, any> }) => {
           const row = payload.new as any;
           const newPost: ClassroomPost = {
             id: row.id,
@@ -109,39 +110,30 @@ export function StreamTab({ classroomId, userId, userName, userRole }: StreamTab
           table: 'classroom_posts',
           filter: `classroom_id=eq.${classroomId}`,
         },
-        (payload) => {
+        (payload: { new: Record<string, any>; old: Record<string, any> }) => {
           const deletedId = (payload.old as any).id;
           if (deletedId) {
             setPosts((prev) => prev.filter((p) => p.id !== deletedId));
           }
         }
       )
-      .subscribe();
+      .subscribe((status: string) => {
+        realtimeLiveRef.current = status === 'SUBSCRIBED';
+      });
 
     return () => {
+      realtimeLiveRef.current = false;
       supabase.removeChannel(channel);
     };
   }, [classroomId]);
 
-  // Polling fallback — direct Supabase client reads using snake_case columns
+  // Polling fallback — only while the realtime channel is down and the tab is visible,
+  // so thousands of open classrooms don't hammer the database every few seconds.
   React.useEffect(() => {
     const interval = setInterval(async () => {
+      if (realtimeLiveRef.current || document.visibilityState !== 'visible') return;
       try {
-        const { data: freshPosts } = await supabase
-          .from('classroom_posts')
-          .select('*')
-          .eq('classroom_id', classroomId)
-          .order('created_at', { ascending: false });
-        if (!freshPosts) return;
-        const mapped: ClassroomPost[] = freshPosts.map((row: any) => ({
-          id: row.id,
-          classroomId: row.classroom_id,
-          authorId: row.author_id,
-          authorName: row.author_name,
-          authorRole: row.author_role || 'student',
-          content: row.content,
-          createdAt: row.created_at,
-        }));
+        const mapped = await listPosts(classroomId);
         setPosts((prev) => {
           const optimistic = prev.filter((p) => p.id.startsWith('opt_'));
           const prevRealIds = new Set(prev.filter((p) => !p.id.startsWith('opt_')).map((p) => p.id));
@@ -158,7 +150,7 @@ export function StreamTab({ classroomId, userId, userName, userRole }: StreamTab
       } catch {
         // Silently ignore polling errors
       }
-    }, 5000);
+    }, 15000);
 
     return () => clearInterval(interval);
   }, [classroomId]);

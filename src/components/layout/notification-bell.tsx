@@ -14,7 +14,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import { getNotificationsForUser, markNotificationRead, markAllNotificationsRead } from '@/actions/notification-actions';
+import { getMyNotifications, markNotificationRead, markAllNotificationsRead } from '@/actions/notification-actions';
+import { getMyProfile } from '@/actions/auth-actions';
 
 export interface NotificationMessage {
   id: string;
@@ -46,18 +47,13 @@ export function NotificationBell() {
   const { toast } = useToast();
 
   const fetchNotifications = React.useCallback(async () => {
-    const storedUserString = localStorage.getItem('loggedInUser');
-    if (!storedUserString) return;
-    const user = JSON.parse(storedUserString);
-    if (!user?.uid) return;
     try {
       const now = Date.now();
       if (!notificationsCachePromise || now - lastNotificationsFetchTime > 5000) {
-        notificationsCachePromise = getNotificationsForUser(user.uid, 20);
+        notificationsCachePromise = getMyNotifications(20);
         lastNotificationsFetchTime = now;
       }
       const result = await notificationsCachePromise;
-      
       if (result.success && result.data) {
         setNotifications(result.data as NotificationMessage[]);
       }
@@ -68,24 +64,22 @@ export function NotificationBell() {
 
   React.useEffect(() => {
     fetchNotifications();
-    // Derive the role-specific notifications route
-    try {
-      const stored = localStorage.getItem('loggedInUser');
-      if (stored) {
-        const u = JSON.parse(stored);
-        const role = u?.role || 'student';
+    getMyProfile()
+      .then((me) => {
         const roleMap: Record<string, string> = {
           super_admin: '/admin/notifications',
           teacher: '/teacher/notifications',
           employee: '/employee/notifications',
           student: '/student/notifications',
         };
-        setNotificationsHref(roleMap[role] ?? '/notifications');
-      }
-    } catch { /* ignore */ }
-    // Poll every 5 minutes (300,000ms) to refresh notifications
-    const interval = setInterval(fetchNotifications, 300000);
-    return () => clearInterval(interval);
+        if (me?.role) setNotificationsHref(roleMap[me.role] ?? '/notifications');
+      })
+      .catch(() => { /* ignore */ });
+    // Refresh every 2 minutes, and whenever the tab regains focus.
+    const interval = setInterval(fetchNotifications, 120000);
+    const onFocus = () => fetchNotifications();
+    window.addEventListener('focus', onFocus);
+    return () => { clearInterval(interval); window.removeEventListener('focus', onFocus); };
   }, [fetchNotifications]);
 
   const unreadCount = notifications.filter((n) => !n.read).length;
@@ -103,7 +97,7 @@ export function NotificationBell() {
     const unreadIds = notifications.filter((n) => !n.read).map((n) => n.id);
     if (unreadIds.length === 0) return;
     try {
-      await markAllNotificationsRead(unreadIds);
+      await markAllNotificationsRead();
       setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
       toast({ title: 'All Read', description: 'All notifications marked as read.' });
     } catch (error) {
@@ -175,9 +169,7 @@ export function NotificationBell() {
                       <p className="text-[11px] text-muted-foreground/60 mt-1">{formatTimestamp(notification.timestamp)}</p>
                     </div>
                     {notification.link ? (
-                      <Link href={notification.link} onClick={() => { if (!notification.read) handleMarkAsRead(notification.id); setIsOpen(false); }}>
-                        <Button variant="ghost" size="sm" className="text-xs h-auto p-1 text-primary hover:text-primary">View</Button>
-                      </Link>
+                      <Button asChild variant="ghost" size="sm" className="text-xs h-auto p-1 text-primary hover:text-primary"><Link href={notification.link} onClick={() => { if (!notification.read) handleMarkAsRead(notification.id); setIsOpen(false); }}>View</Link></Button>
                     ) : (
                       !notification.read && (
                         <Button variant="ghost" size="sm" className="text-xs h-auto p-1 text-muted-foreground" onClick={() => handleMarkAsRead(notification.id)}>
@@ -192,9 +184,7 @@ export function NotificationBell() {
           )}
         </ScrollArea>
         <div className="p-2 border-t bg-muted/20 text-center">
-          <Link href={notificationsHref} onClick={() => setIsOpen(false)}>
-            <Button variant="ghost" size="sm" className="text-xs w-full text-muted-foreground hover:text-foreground">View all notifications</Button>
-          </Link>
+          <Button asChild variant="ghost" size="sm" className="text-xs w-full text-muted-foreground hover:text-foreground"><Link href={notificationsHref} onClick={() => setIsOpen(false)}>View all notifications</Link></Button>
         </div>
       </PopoverContent>
     </Popover>

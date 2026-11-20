@@ -1,12 +1,9 @@
 'use server';
 
-// BUG FIX #1: Was using browser-side supabase singleton in a server action.
-// BUG FIX #2–4: All camelCase column references fixed to snake_case (classroom_id, created_at, teacher_id, file_url).
-import { createServerSupabaseClient } from '@/lib/supabase';
-import { generateId } from '@/lib/db';
+import { createServiceRoleClient } from '@/lib/supabase';
+import { authorize, requireRole, isUuid } from '@/lib/auth-guard';
+import { canAccessClassroom, isClassroomOwner } from '@/lib/classroom-access';
 import type { ActionResult } from '@/lib/types';
-
-// ─── Types ──────────────────────────────────────────────
 
 export interface ClassroomNote {
   id: string;
@@ -21,86 +18,11 @@ export interface ClassroomNote {
   createdAt: string;
 }
 
-// Re-use existing 'submissions' bucket with notes/ prefix
+// Notes share the `submissions` storage bucket under the notes/ prefix.
 const NOTES_BUCKET = 'submissions';
 
-// ─── Create note record in DB (file already uploaded client-side) ───
-
-export async function createNoteRecord(payload: {
-  classroomId: string;
-  teacherId: string;
-  teacherName: string;
-  description: string;
-  fileName: string;
-  fileUrl: string;
-  fileType: string;
-  fileSize: number;
-}): Promise<ActionResult & { note?: ClassroomNote }> {
-  try {
-    const { classroomId, teacherId, teacherName, description, fileName, fileUrl, fileType, fileSize } = payload;
-
-    if (!classroomId || !teacherId || !teacherName || !fileName || !fileUrl) {
-      return { success: false, error: 'Missing required fields.' };
-    }
-
-    const supabase = await createServerSupabaseClient();
-    const noteId = generateId();
-    const now = new Date().toISOString();
-
-    // Insert using snake_case column names matching the DB schema
-    const { error: dbError } = await supabase.from('classroom_notes').insert({
-      id: noteId,
-      classroom_id: classroomId,
-      teacher_id: teacherId,
-      teacher_name: teacherName,
-      description: (description || '').trim(),
-      file_name: fileName,
-      file_url: fileUrl,
-      file_type: fileType,
-      file_size: fileSize,
-      created_at: now,
-    });
-
-    if (dbError) {
-      return { success: false, error: `Failed to save note: ${dbError.message}` };
-    }
-
-    const noteRecord: ClassroomNote = {
-      id: noteId,
-      classroomId,
-      teacherId,
-      teacherName,
-      description: (description || '').trim(),
-      fileName,
-      fileUrl,
-      fileType,
-      fileSize,
-      createdAt: now,
-    };
-
-    return { success: true, message: 'Note uploaded successfully.', note: noteRecord };
-  } catch (err: any) {
-    return { success: false, error: err.message || 'An unexpected error occurred.' };
-  }
-}
-
-// ─── List notes for a classroom ─────────────────────────
-
-export async function listNotes(classroomId: string): Promise<ClassroomNote[]> {
-  const supabase = await createServerSupabaseClient();
-
-  // BUG FIX #2: column is 'classroom_id' not 'classroomId'
-  // BUG FIX #3: order by 'created_at' not 'createdAt'
-  const { data, error } = await supabase
-    .from('classroom_notes')
-    .select('*')
-    .eq('classroom_id', classroomId)
-    .order('created_at', { ascending: false });
-
-  if (error) return [];
-
-  // Map snake_case DB rows to camelCase ClassroomNote interface
-  return (data || []).map((row: any) => ({
+function rowToNote(row: any): ClassroomNote {
+  return {
     id: row.id,
     classroomId: row.classroom_id,
     teacherId: row.teacher_id,
@@ -109,38 +31,81 @@ export async function listNotes(classroomId: string): Promise<ClassroomNote[]> {
     fileName: row.file_name,
     fileUrl: row.file_url,
     fileType: row.file_type || '',
-    fileSize: row.file_size || 0,
+    fileSize: Number(row.file_size) || 0,
     createdAt: row.created_at,
-  }));
+  };
 }
 
-// ─── Delete a note (only the teacher who posted it) ─────
+/** Create the note record after the file was uploaded from the browser. Owner-only. */
+export async function createNoteRecord(payload: {
+  classroomId: string;
+  teacherId?: string;
+  teacherName?: string;
+  description: string;
+  fileName: string;
+  fileUrl: string;
+  fileType: string;
+  fileSize: number;
+}): Promise<ActionResult & { note?: ClassroomNote }> {
+  const auth = await authorize('teacher');
+  if (!auth.ok) return { success: false, error: auth.error };
+  const { classroomId, description, fileName, fileUrl, fileType, fileSize } = payload || ({} as any);
+  if (!isUuid(classroomId) || !fileName || !fileUrl) return { success: false, error: 'Missing required fields.' };
+  if (!(await isClassroomOwner(auth.caller, classroomId))) return { success: false, error: 'Only the classroom owner can upload notes.' };
+  if (!fileUrl.includes(`/${NOTES_BUCKET}/notes/${classroomId}/`)) return { success: false, error: 'Invalid file location.' };
 
-export async function deleteNote(noteId: string, userId: string): Promise<ActionResult> {
-  const supabase = await createServerSupabaseClient();
-
-  // BUG FIX #4: column is 'teacher_id' not 'teacherId', 'file_url' not 'fileUrl'
-  const { data: note } = await supabase
+  const admin = await createServiceRoleClient();
+  const { data, error } = await admin
     .from('classroom_notes')
-    .select('teacher_id, file_url')
-    .eq('id', noteId)
+    .insert({
+      classroom_id: classroomId,
+      teacher_id: auth.caller.userId,
+      teacher_name: auth.caller.fullName,
+      description: String(description || '').trim().slice(0, 2000),
+      file_name: String(fileName).slice(0, 255),
+      file_url: fileUrl,
+      file_type: fileType || null,
+      file_size: Number(fileSize) || 0,
+    })
+    .select()
     .single();
+  if (error) return { success: false, error: `Failed to save note: ${error.message}` };
+  return { success: true, message: 'Note uploaded successfully.', note: rowToNote(data) };
+}
 
+export async function listNotes(classroomId: string): Promise<ClassroomNote[]> {
+  const caller = await requireRole();
+  if (!isUuid(classroomId) || !(await canAccessClassroom(caller, classroomId))) return [];
+  const admin = await createServiceRoleClient();
+  const { data } = await admin
+    .from('classroom_notes')
+    .select('*')
+    .eq('classroom_id', classroomId)
+    .order('created_at', { ascending: false })
+    .limit(500);
+  return (data || []).map(rowToNote);
+}
+
+export async function deleteNote(noteId: string, _userId?: string): Promise<ActionResult> {
+  const auth = await authorize('teacher');
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!isUuid(noteId)) return { success: false, error: 'Invalid note.' };
+  const admin = await createServiceRoleClient();
+  const { data: note } = await admin.from('classroom_notes').select('teacher_id, classroom_id, file_url').eq('id', noteId).maybeSingle();
   if (!note) return { success: false, error: 'Note not found.' };
-  if (note.teacher_id !== userId) return { success: false, error: 'Not authorized to delete this note.' };
-
-  // Try to delete the file from storage too
-  try {
-    const url = new URL(note.file_url);
-    const pathParts = url.pathname.split(`/storage/v1/object/public/${NOTES_BUCKET}/`);
-    if (pathParts[1]) {
-      await supabase.storage.from(NOTES_BUCKET).remove([decodeURIComponent(pathParts[1])]);
-    }
-  } catch {
-    // Ignore storage deletion errors — note record will still be removed
+  if (note.teacher_id !== auth.caller.userId && !(await isClassroomOwner(auth.caller, note.classroom_id))) {
+    return { success: false, error: 'Not authorized to delete this note.' };
   }
 
-  const { error } = await supabase.from('classroom_notes').delete().eq('id', noteId);
+  try {
+    const marker = `/storage/v1/object/public/${NOTES_BUCKET}/`;
+    const path = new URL(note.file_url).pathname.split(marker)[1];
+    if (path) await admin.storage.from(NOTES_BUCKET).remove([decodeURIComponent(path)]);
+  } catch {
+    // Storage cleanup is best-effort; the DB record is still removed.
+  }
+
+  const { error } = await admin.from('classroom_notes').delete().eq('id', noteId);
   if (error) return { success: false, error: error.message };
   return { success: true, message: 'Note deleted.' };
 }

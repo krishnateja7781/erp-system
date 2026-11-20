@@ -1,14 +1,36 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
+const DASHBOARD: Record<string, string> = {
+  super_admin: '/admin/dashboard',
+  teacher: '/teacher/dashboard',
+  student: '/student/dashboard',
+  employee: '/employee/dashboard',
+}
+
+/** Each employee department may only reach its own module (plus the shared pages below). */
+const EMPLOYEE_MODULES: Record<string, string[]> = {
+  fee_management: ['/employee/fees'],
+  hostel_management: ['/employee/hostel'],
+  student_staff_management: ['/employee/users', '/employee/students', '/employee/teachers'],
+  exam_marks_management: ['/employee/exams'],
+  library_management: ['/employee/library'],
+}
+const EMPLOYEE_SHARED = ['/employee/dashboard', '/employee/notifications', '/employee/settings']
+
+const AUTH_PAGES = ['/login', '/signup', '/admin-signup', '/forgot-password']
+const PUBLIC_PAGES = ['/unauthorized', '/auth/callback']
+
+const startsWithAny = (path: string, prefixes: string[]) =>
+  prefixes.some((p) => path === p || path.startsWith(p + '/'))
+
 export async function middleware(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({ request })
+  let response = NextResponse.next({ request })
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   if (!supabaseUrl || !supabaseKey) {
-    return NextResponse.next()
+    return new NextResponse('Server misconfigured: Supabase environment variables are missing.', { status: 500 })
   }
 
   const supabase = createServerClient(supabaseUrl, supabaseKey, {
@@ -16,124 +38,77 @@ export async function middleware(request: NextRequest) {
       getAll() { return request.cookies.getAll() },
       setAll(cookiesToSet) {
         cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
-        supabaseResponse = NextResponse.next({ request })
-        cookiesToSet.forEach(({ name, value, options }) =>
-          supabaseResponse.cookies.set(name, value, options)
-        )
+        response = NextResponse.next({ request })
+        cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options))
       },
     },
   })
 
-  const { data: { user } } = await supabase.auth.getUser()
   const pathname = request.nextUrl.pathname
+  if (startsWithAny(pathname, PUBLIC_PAGES)) return response
 
-  // ── Auth pages: redirect logged-in users to their dashboard ──
-  const isAuthPage = pathname.startsWith('/login') ||
-                     pathname.startsWith('/signup') ||
-                     pathname.startsWith('/admin-signup') ||
-                     pathname.startsWith('/forgot-password')
+  // getUser() validates the JWT with Supabase Auth (never trust the cookie alone).
+  const { data: { user } } = await supabase.auth.getUser()
 
-  if (isAuthPage) {
-    if (user) {
-      const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-      if (profile?.role === 'super_admin') return NextResponse.redirect(new URL('/admin/dashboard', request.url))
-      if (profile?.role === 'teacher')     return NextResponse.redirect(new URL('/teacher/dashboard', request.url))
-      if (profile?.role === 'student')     return NextResponse.redirect(new URL('/student/dashboard', request.url))
-      if (profile?.role === 'employee')    return NextResponse.redirect(new URL('/employee/dashboard', request.url))
-    }
-    return supabaseResponse
+  /**
+   * Role and employee department are mirrored into app_metadata by a DB trigger
+   * (see database/schema.sql → sync_auth_claims), so the common path needs no
+   * extra query. Fallback to the tables for accounts created before the trigger.
+   */
+  let role: string | undefined = user?.app_metadata?.role
+  let employeeType: string | undefined = user?.app_metadata?.employee_type
+  if (user && !role) {
+    const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle()
+    role = profile?.role
   }
 
-  // ── Public pages accessible without login ──
-  if (pathname.startsWith('/unauthorized')) {
-    return supabaseResponse
+  const redirect = (to: string) => {
+    const res = NextResponse.redirect(new URL(to, request.url))
+    response.cookies.getAll().forEach((c) => res.cookies.set(c))
+    return res
   }
 
-  // ── All other routes require an authenticated session ──
+  if (startsWithAny(pathname, AUTH_PAGES)) {
+    if (user && role && DASHBOARD[role]) return redirect(DASHBOARD[role])
+    return response
+  }
+
   if (!user) {
-    return NextResponse.redirect(new URL('/login', request.url))
+    const login = new URL('/login', request.url)
+    if (pathname !== '/') login.searchParams.set('next', pathname)
+    return NextResponse.redirect(login)
   }
+  if (!role || !DASHBOARD[role]) return redirect('/unauthorized')
 
-  // ── Fetch user role ──
-  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-  if (!profile?.role) {
-    return NextResponse.redirect(new URL('/unauthorized', request.url))
-  }
+  if (pathname === '/') return redirect(DASHBOARD[role])
 
-  const role = profile.role
+  // Routes any signed-in user may open.
+  if (startsWithAny(pathname, ['/settings', '/library', '/update-password'])) return response
 
-  // ── Root "/" → redirect to correct dashboard ──
-  if (pathname === '/') {
-    if (role === 'super_admin') return NextResponse.redirect(new URL('/admin/dashboard', request.url))
-    if (role === 'teacher')     return NextResponse.redirect(new URL('/teacher/dashboard', request.url))
-    if (role === 'student')     return NextResponse.redirect(new URL('/student/dashboard', request.url))
-    if (role === 'employee')    return NextResponse.redirect(new URL('/employee/dashboard', request.url))
-  }
-
-  // ── Global routes always allowed for any authenticated user ──
-  // BUG FIX #18: /classrooms should NOT be accessible by employees — moved to role-specific blocks
-  const isGlobalRoute = pathname.startsWith('/settings') ||
-                        pathname.startsWith('/library')
-  if (isGlobalRoute) return supabaseResponse
-
-  // ── Super Admin: can reach any /admin/* route ──
   if (role === 'super_admin') {
-    if (pathname.startsWith('/admin')) return supabaseResponse
-    return NextResponse.redirect(new URL('/admin/dashboard', request.url))
+    return pathname.startsWith('/admin') ? response : redirect(DASHBOARD.super_admin)
   }
-
-  // ── Teacher ──
   if (role === 'teacher') {
-    if (pathname.startsWith('/teacher') || pathname.startsWith('/classrooms')) return supabaseResponse
-    return NextResponse.redirect(new URL('/teacher/dashboard', request.url))
+    return pathname.startsWith('/teacher') || pathname.startsWith('/classrooms') ? response : redirect(DASHBOARD.teacher)
   }
-
-  // ── Student ──
   if (role === 'student') {
-    if (pathname.startsWith('/student') || pathname.startsWith('/classrooms')) return supabaseResponse
-    return NextResponse.redirect(new URL('/student/dashboard', request.url))
+    return pathname.startsWith('/student') || pathname.startsWith('/classrooms') ? response : redirect(DASHBOARD.student)
   }
 
-  // ── Employee: route based on employee_type ──
-  if (role === 'employee') {
-    // All employees share the dashboard
-    if (pathname.startsWith('/employee/dashboard')) return supabaseResponse
+  // Employee
+  if (!pathname.startsWith('/employee')) return redirect(DASHBOARD.employee)
+  if (startsWithAny(pathname, EMPLOYEE_SHARED)) return response
 
-    const { data: employee } = await supabase
-      .from('employees')
-      .select('employee_type')
-      .eq('profile_id', user.id)
-      .single()
-
-    if (!employee?.employee_type) {
-      return NextResponse.redirect(new URL('/unauthorized', request.url))
-    }
-
-    const empType = employee.employee_type
-
-    const employeeRouteMap: Record<string, string> = {
-      fee_management:           '/employee/fees',
-      hostel_management:        '/employee/hostel',
-      student_staff_management: '/employee/users',
-      exam_marks_management:    '/employee/exams',
-      library_management:       '/employee/library',
-    }
-
-    const allowedBase = employeeRouteMap[empType]
-    if (allowedBase && pathname.startsWith(allowedBase)) return supabaseResponse
-
-    // Allow any other /employee/* sub-route (shared components, settings etc.)
-    if (pathname.startsWith('/employee')) return supabaseResponse
-
-    return NextResponse.redirect(new URL('/employee/dashboard', request.url))
+  if (!employeeType) {
+    const { data: emp } = await supabase.from('employees').select('employee_type').eq('profile_id', user.id).maybeSingle()
+    employeeType = emp?.employee_type ?? undefined
   }
-
-  // ── Catch-all: unknown role ──
-  return NextResponse.redirect(new URL('/unauthorized', request.url))
+  if (!employeeType || !EMPLOYEE_MODULES[employeeType]) return redirect('/unauthorized')
+  return startsWithAny(pathname, EMPLOYEE_MODULES[employeeType]) ? response : redirect(DASHBOARD.employee)
 }
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|api|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|api|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|txt|xml)$).*)',
   ],
 }

@@ -21,6 +21,7 @@ import {
     Percent
 } from "lucide-react";
 import { getExamById, getTeacherExamStudents, type StudentEligibility } from "@/actions/exam-actions";
+import { getMyTeacherId } from "@/actions/teacher-actions";
 import type { ExamSchedule } from "@/lib/types";
 import { useToast } from "@/hooks/use-toast";
 
@@ -40,8 +41,7 @@ export default function TeacherExamDetailsPage() {
     const [filterStatus, setFilterStatus] = React.useState<FilterStatus>('all');
 
     React.useEffect(() => {
-        const user = JSON.parse(localStorage.getItem('loggedInUser') || '{}');
-        if (user.uid) setTeacherId(user.uid);
+        getMyTeacherId().then((id) => { if (id) setTeacherId(id); });
     }, []);
 
     React.useEffect(() => {

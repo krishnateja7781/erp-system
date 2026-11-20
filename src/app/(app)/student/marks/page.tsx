@@ -1,5 +1,6 @@
 
 'use client';
+import Link from 'next/link';
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -10,7 +11,7 @@ import { AlertTriangle, CheckCircle, Loader2, BookOpen } from "lucide-react";
 import { fetchStudentBacklogs, getMyStudentProfile } from "@/actions/student-actions";
 import { getStudentMarksForDisplay, type SemesterMarksData, type CourseMark } from "@/actions/marks-actions";
 
-type BacklogEntry = { courseCode: string | null; courseName: string | null; semesterAttempted: number | null; status: 'Active' | 'Cleared' | null; gradeAchieved: string | null; };
+type BacklogEntry = { courseCode: string | null; courseName: string | null; semesterAttempted: number | null; status: 'Active' | 'Cleared' | null; gradeAchieved: string | null; failCount?: number; };
 
 const getGradePoint = (grade: string | null): number | null => {
     if (!grade || grade === 'N/A' || grade === '-') return null;
@@ -220,14 +221,17 @@ export default function StudentMarksPage() {
                     </CardHeader>
                     <CardContent className="pt-4">
                         {activeBacklogs.length > 0 ? (
+                            <>
                             <Table>
-                                <TableHeader><TableRow><TableHead>Course</TableHead><TableHead className="text-right">Sem</TableHead></TableRow></TableHeader>
+                                <TableHeader><TableRow><TableHead>Course</TableHead><TableHead className="text-right">Sem</TableHead><TableHead className="text-right">Count</TableHead></TableRow></TableHeader>
                                 <TableBody>
                                     {activeBacklogs.map((b, i) => (
-                                        <TableRow key={i}><TableCell className="font-medium text-sm">{b.courseName}</TableCell><TableCell className="text-right font-bold">{b.semesterAttempted}</TableCell></TableRow>
+                                        <TableRow key={i}><TableCell className="font-medium text-sm">{b.courseName}</TableCell><TableCell className="text-right font-bold">{b.semesterAttempted}</TableCell><TableCell className="text-right">{b.failCount ?? 1}</TableCell></TableRow>
                                     ))}
                                 </TableBody>
                             </Table>
+                            <Link href="/student/backlogs" className="mt-3 inline-block text-sm text-primary hover:underline">View backlog details →</Link>
+                            </>
                         ) : (
                             <div className="flex flex-col items-center justify-center py-6 gap-2 text-muted-foreground">
                                 <CheckCircle className="h-8 w-8 text-green-500 opacity-50" />

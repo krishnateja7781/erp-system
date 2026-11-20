@@ -1,216 +1,161 @@
 'use server';
 
-import { createServiceRoleClient as createServerSupabaseClient } from '@/lib/supabase';
-import type { Class, ActionResult } from '@/lib/types';
+import { createServiceRoleClient } from '@/lib/supabase';
+import { authorize, requireRole, isUuid } from '@/lib/auth-guard';
+import { fetchAllRows, resolveCourseId } from '@/lib/db';
+import type { ActionResult } from '@/lib/types';
 
-interface ClassPayload { program: string; branch: string; year: string | number; semester: number; courseId: string; section: string; teacherId: string; }
+const CLASS_ADMINS = ['emp:exam_marks_management'] as const;
+
+interface ClassPayload {
+  program: string;
+  branch: string;
+  /** Year of study (1..5) */
+  year: string | number;
+  semester: number;
+  courseId: string;
+  section: string;
+  /** Teacher profile id or teachers.id */
+  teacherId: string;
+}
+
+async function resolveTeacherPk(admin: any, teacherId: string): Promise<string | null> {
+  if (!isUuid(teacherId)) return null;
+  const { data } = await admin
+    .from('teachers')
+    .select('id')
+    .or(`profile_id.eq.${teacherId},id.eq.${teacherId}`)
+    .limit(1)
+    .maybeSingle();
+  return data?.id ?? null;
+}
 
 export async function createClass(payload: ClassPayload): Promise<ActionResult> {
-    const { year, semester, courseId, section, teacherId } = payload;
-    try {
-        const supabase = await createServerSupabaseClient();
-        
-        let targetCourseId = courseId;
-        if (!courseId.includes('-')) {
-             const { data: cData } = await supabase.from('courses').select('id').eq('code', courseId).single();
-             if (cData) targetCourseId = cData.id;
-        }
+  const auth = await authorize(...CLASS_ADMINS);
+  if (!auth.ok) return { success: false, error: auth.error };
 
-        let targetTeacherId = teacherId;
-        if (teacherId) {
-             const { data: tData } = await supabase.from('teachers').select('id').eq('profile_id', teacherId).limit(1);
-             if (tData && tData.length > 0) targetTeacherId = tData[0].id;
-             else {
-               const { data: tData2 } = await supabase.from('teachers').select('id').eq('id', teacherId).limit(1);
-               if (tData2 && tData2.length > 0) targetTeacherId = tData2[0].id;
-             }
-        }
-        
-        // Fetch or create a default academic term to satisfy the foreign key non-null constraint
-        const { data: termData } = await supabase.from('academic_terms').select('id').limit(1);
-        let defaultTermId = termData?.[0]?.id;
-        if (!defaultTermId) {
-            const { data: newTerm } = await supabase.from('academic_terms').insert({
-                name: 'Default Term',
-                code: 'DT-' + new Date().getFullYear(),
-                start_date: new Date().toISOString().split('T')[0],
-                end_date: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0]
-            }).select('id').single();
-            defaultTermId = newTerm?.id;
-        }
+  const { program, branch, year, semester, courseId, section, teacherId } = payload;
+  if (!program || !branch || !semester || !courseId || !section) return { success: false, error: 'Program, branch, semester, section and course are required.' };
 
-        const { data: existing } = await supabase.from('classes')
-            .select('id')
-            .eq('course_id', targetCourseId)
-            .eq('academic_year', year.toString())
-            .eq('semester', semester)
-            .eq('section', section);
+  try {
+    const admin = await createServiceRoleClient();
+    const targetCourseId = await resolveCourseId(admin, courseId);
+    if (!targetCourseId) return { success: false, error: `Course ${courseId} not found.` };
+    const targetTeacherId = teacherId ? await resolveTeacherPk(admin, teacherId) : null;
 
-        if (existing && existing.length > 0) {
-            return { success: false, error: `A class for Course ID ${courseId} - Section ${section} already exists.` };
-        }
+    // The current academic term (created by the schema seed; `ensure_current_term` creates one if missing).
+    const { data: termId, error: termErr } = await admin.rpc('ensure_current_term');
+    if (termErr) return { success: false, error: `Academic term unavailable: ${termErr.message}` };
 
-        const { error } = await supabase.from('classes').insert({
-            course_id: targetCourseId,
-            academic_term_id: defaultTermId,
-            teacher_id: targetTeacherId || null,
-            section,
-            program: payload.program,
-            branch: payload.branch,
-            year: parseInt(year.toString(), 10),
-            academic_year: year.toString(),
-            semester
-        });
+    const { error } = await admin.from('classes').insert({
+      course_id: targetCourseId,
+      academic_term_id: termId,
+      teacher_id: targetTeacherId,
+      section: section.toUpperCase(),
+      program,
+      branch,
+      year: parseInt(String(year), 10) || Math.ceil(semester / 2),
+      academic_year: String(year),
+      semester,
+    });
 
-        if (error) return { success: false, error: error.message };
-
-        return { success: true, message: `Successfully created class for Section ${section}.` };
-    } catch (error: any) {
-        return { success: false, error: error.message || 'An unexpected error occurred while creating the class.' };
+    if (error) {
+      if (error.code === '23505') return { success: false, error: `A class for course ${courseId}, section ${section} already exists.` };
+      return { success: false, error: error.message };
     }
+    return { success: true, message: `Successfully created class for Section ${section}.` };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'An unexpected error occurred while creating the class.' };
+  }
 }
 
 export async function getClassesWithDetails(): Promise<any[]> {
-    try {
-        const supabase = await createServerSupabaseClient();
+  await requireRole(...CLASS_ADMINS, 'emp:student_staff_management');
+  const admin = await createServiceRoleClient();
 
-        // Step 1: Fetch core class data WITHOUT the classrooms join
-        // (classroom_id column may not exist yet if migration hasn't been run)
-        const { data: classesData, error } = await supabase.from('classes').select(`
-            *,
-            courses (code, name, program, branch, credits),
-            teachers (profile_id, profiles (full_name))
-        `);
+  const [classes, { data: counts }] = await Promise.all([
+    fetchAllRows(() =>
+      admin
+        .from('classes')
+        .select('id, program, branch, year, academic_year, semester, section, classroom_id, courses(code, name, credits), teachers(profile_id, profiles(full_name)), classrooms(name)')
+        .order('program')
+        .order('branch')
+        .order('section'),
+    ),
+    admin.rpc('get_section_student_counts'),
+  ]);
 
-        if (error || !classesData) return [];
+  const countMap = new Map<string, number>();
+  for (const r of (counts as any[]) || []) {
+    countMap.set(`${r.program}|${r.branch}|${r.current_semester}|${r.section}`, Number(r.student_count));
+  }
 
-        const uiClasses = classesData.map((c: any) => {
-            return {
-                id: c.id,
-                program: c.courses?.program,
-                branch: c.courses?.branch,
-                year: c.academic_year,
-                semester: c.semester,
-                section: c.section,
-                courseId: c.courses?.code,
-                courseName: c.courses?.name || 'N/A',
-                credits: c.courses?.credits || 0,
-                teacherId: c.teachers?.profile_id,
-                teacherName: c.teachers?.profiles?.full_name || 'N/A',
-                studentCount: 0,
-                classroomId: c.classroom_id || null,
-                classroomName: null as string | null,
-            };
-        }).sort((a: any, b: any) => {
-            if (a.program !== b.program) return (a.program || '').localeCompare(b.program || '');
-            if (a.branch !== b.branch) return (a.branch || '').localeCompare(b.branch || '');
-            return (a.section || '').localeCompare(b.section || '');
-        });
-
-        // Step 2: Fetch student counts
-        const { data: students } = await supabase.from('students').select('program, branch, current_year, current_semester');
-        if (students) {
-           uiClasses.forEach(c => {
-               const matchingStudents = students.filter(s =>
-                   s.program === c.program &&
-                   s.branch === c.branch &&
-                   s.current_year.toString() === c.year &&
-                   s.current_semester === c.semester
-               );
-               c.studentCount = matchingStudents.length;
-           });
-        }
-
-        // Step 3: Separately resolve classroom names for rows that have a classroom_id
-        // This is a separate query so it doesn't break the main fetch if classroom_id column is missing
-        const linkedIds = uiClasses.map(c => c.classroomId).filter(Boolean) as string[];
-        if (linkedIds.length > 0) {
-            try {
-                const { data: classroomRows } = await supabase
-                    .from('classrooms')
-                    .select('id, name')
-                    .in('id', linkedIds);
-                if (classroomRows) {
-                    const nameMap = Object.fromEntries(classroomRows.map((r: any) => [r.id, r.name]));
-                    uiClasses.forEach(c => {
-                        if (c.classroomId) c.classroomName = nameMap[c.classroomId] || null;
-                    });
-                }
-            } catch {
-                // Classroom name lookup is non-critical — swallow silently
-            }
-        }
-
-        return uiClasses;
-    } catch {
-        throw new Error('Failed to load class data.');
-    }
+  return classes.map((c: any) => ({
+    id: c.id,
+    program: c.program,
+    branch: c.branch,
+    year: c.academic_year ?? String(c.year ?? ''),
+    semester: c.semester,
+    section: c.section,
+    courseId: c.courses?.code,
+    courseName: c.courses?.name || 'N/A',
+    credits: c.courses?.credits || 0,
+    teacherId: c.teachers?.profile_id,
+    teacherName: c.teachers?.profiles?.full_name || 'N/A',
+    studentCount: countMap.get(`${c.program}|${c.branch}|${c.semester}|${c.section}`) || 0,
+    classroomId: c.classroom_id || null,
+    classroomName: c.classrooms?.name || null,
+  }));
 }
 
-
 export async function getAllClassrooms(): Promise<{ id: string; name: string; subject: string; section: string }[]> {
-    try {
-        const supabase = await createServerSupabaseClient();
-        const { data, error } = await supabase
-            .from('classrooms')
-            .select('id, name, subject, section')
-            .order('name', { ascending: true });
-        if (error || !data) return [];
-        return data.map((c: any) => ({ id: c.id, name: c.name || '', subject: c.subject || '', section: c.section || '' }));
-    } catch { return []; }
+  await requireRole(...CLASS_ADMINS);
+  const admin = await createServiceRoleClient();
+  const data = await fetchAllRows(() => admin.from('classrooms').select('id, name, subject, section').order('name'));
+  return data.map((c: any) => ({ id: c.id, name: c.name || '', subject: c.subject || '', section: c.section || '' }));
 }
 
 export async function linkClassroomToClass(classId: string, classroomId: string): Promise<ActionResult> {
-    if (!classId || !classroomId) return { success: false, error: 'Class ID and Classroom ID are required.' };
-    try {
-        const supabase = await createServerSupabaseClient();
-        const { error } = await supabase.from('classes').update({ classroom_id: classroomId }).eq('id', classId);
-        if (error) return { success: false, error: error.message };
-        return { success: true, message: 'Classroom linked successfully.' };
-    } catch (e: any) {
-        return { success: false, error: e.message || 'Failed to link classroom.' };
-    }
+  const auth = await authorize(...CLASS_ADMINS);
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!isUuid(classId) || !isUuid(classroomId)) return { success: false, error: 'Class ID and Classroom ID are required.' };
+  const admin = await createServiceRoleClient();
+  const { error } = await admin.from('classes').update({ classroom_id: classroomId }).eq('id', classId);
+  if (error) return { success: false, error: error.message };
+  return { success: true, message: 'Classroom linked successfully.' };
 }
 
 export async function unlinkClassroomFromClass(classId: string): Promise<ActionResult> {
-    if (!classId) return { success: false, error: 'Class ID is required.' };
-    try {
-        const supabase = await createServerSupabaseClient();
-        const { error } = await supabase.from('classes').update({ classroom_id: null }).eq('id', classId);
-        if (error) return { success: false, error: error.message };
-        return { success: true, message: 'Classroom unlinked successfully.' };
-    } catch (e: any) {
-        return { success: false, error: e.message || 'Failed to unlink classroom.' };
-    }
+  const auth = await authorize(...CLASS_ADMINS);
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!isUuid(classId)) return { success: false, error: 'Class ID is required.' };
+  const admin = await createServiceRoleClient();
+  const { error } = await admin.from('classes').update({ classroom_id: null }).eq('id', classId);
+  if (error) return { success: false, error: error.message };
+  return { success: true, message: 'Classroom unlinked successfully.' };
 }
 
 export async function updateTeacherForClass(classId: string, teacherId: string): Promise<ActionResult> {
-    if (!classId || !teacherId) return { success: false, error: 'Class ID and Teacher ID are required.' };
-    try {
-        const supabase = await createServerSupabaseClient();
-        
-        let targetTeacherId = teacherId;
-        const { data: tData } = await supabase.from('teachers').select('id').eq('profile_id', teacherId).limit(1);
-        if (tData && tData.length > 0) targetTeacherId = tData[0].id;
-        
-        const { error } = await supabase.from('classes').update({ teacher_id: targetTeacherId }).eq('id', classId);
-        if (error) return { success: false, error: error.message };
-        
-        return { success: true, message: 'Teacher successfully assigned to class.' };
-    } catch {
-        return { success: false, error: 'Failed to assign teacher.' };
-    }
+  const auth = await authorize(...CLASS_ADMINS);
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!isUuid(classId) || !teacherId) return { success: false, error: 'Class ID and Teacher ID are required.' };
+  const admin = await createServiceRoleClient();
+  const teacherPk = await resolveTeacherPk(admin, teacherId);
+  if (!teacherPk) return { success: false, error: 'Teacher not found.' };
+  const { error } = await admin.from('classes').update({ teacher_id: teacherPk }).eq('id', classId);
+  if (error) return { success: false, error: error.message };
+  return { success: true, message: 'Teacher successfully assigned to class.' };
 }
 
 export async function deleteClass(classId: string): Promise<ActionResult> {
-    if (!classId) return { success: false, error: 'Class ID is required.' };
-    try {
-        const supabase = await createServerSupabaseClient();
-        const { error } = await supabase.from('classes').delete().eq('id', classId);
-        if (error) return { success: false, error: error.message };
-        return { success: true, message: 'Class deleted successfully.' };
-    } catch {
-        return { success: false, error: 'Failed to delete class.' };
-    }
+  const auth = await authorize(...CLASS_ADMINS);
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!isUuid(classId)) return { success: false, error: 'Class ID is required.' };
+  const admin = await createServiceRoleClient();
+  const { error } = await admin.from('classes').delete().eq('id', classId);
+  if (error) {
+    if (error.code === '23503') return { success: false, error: 'This class has attendance or marks recorded and cannot be deleted.' };
+    return { success: false, error: error.message };
+  }
+  return { success: true, message: 'Class deleted successfully.' };
 }
-

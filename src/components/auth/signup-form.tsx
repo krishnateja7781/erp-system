@@ -23,13 +23,18 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, UserPlus, GraduationCap } from "lucide-react";
 import { studentSelfRegister } from '@/actions/auth-actions';
+import { PROGRAMS, BRANCHES, previewStudentId } from '@/lib/academic-codes';
+
+const JOINING_YEARS = Array.from({ length: 8 }, (_, i) => String(new Date().getFullYear() - i));
 
 const studentGenders = ["Male", "Female", "Other"];
 
 const formSchema = z.object({
   firstName: z.string().min(2, { message: "First name must be at least 2 characters." }).trim(),
   lastName: z.string().min(1, { message: "Last name is required." }).trim(),
-  studentId: z.string().min(3, { message: "Student ID must be at least 3 characters." }).trim(),
+  program: z.string({ required_error: "Please select your program." }).min(1, "Please select your program."),
+  branch: z.string({ required_error: "Please select your branch." }).min(1, "Please select your branch."),
+  joiningYear: z.string().regex(/^\d{4}$/, "Select the year you joined."),
   gender: z.enum(["Male", "Female", "Other"], { required_error: "Please select your gender." }),
   email: z.string().email({ message: "Please enter a valid email address." }),
   password: z.string().min(6, { message: "Password must be at least 6 characters" }),
@@ -52,13 +57,19 @@ export function SignupForm() {
     defaultValues: {
       firstName: "",
       lastName: "",
-      studentId: "",
+      program: "",
+      branch: "",
+      joiningYear: String(new Date().getFullYear()),
       gender: undefined,
       email: "",
       password: "",
       confirmPassword: "",
     },
   });
+
+  const watchedProgram = form.watch("program");
+  const watchedBranch = form.watch("branch");
+  const watchedYear = form.watch("joiningYear");
 
   async function onSubmit(values: SignupFormValues) {
     setIsLoading(true);
@@ -68,7 +79,7 @@ export function SignupForm() {
       if (result.success) {
         toast({
           title: "Registration Successful!",
-          description: "Your account has been created. Please log in to continue and verify your email.",
+          description: `Your account has been created. Your college ID is ${result.studentId}. Please log in to continue.`,
           duration: 8000,
         });
         router.push('/login');
@@ -135,13 +146,50 @@ export function SignupForm() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <FormField
                   control={form.control}
-                  name="studentId"
+                  name="program"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Student ID / College ID</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Enter your official ID" {...field} value={field.value ?? ""} />
-                      </FormControl>
+                      <FormLabel>Program</FormLabel>
+                      <Select onValueChange={(v) => { field.onChange(v); form.setValue('branch', ''); }} value={field.value}>
+                        <FormControl><SelectTrigger><SelectValue placeholder="Select program" /></SelectTrigger></FormControl>
+                        <SelectContent>{PROGRAMS.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="branch"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Branch</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value} disabled={!watchedProgram}>
+                        <FormControl><SelectTrigger><SelectValue placeholder="Select branch" /></SelectTrigger></FormControl>
+                        <SelectContent>{(BRANCHES[watchedProgram] || []).map(b => <SelectItem key={b} value={b}>{b}</SelectItem>)}</SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+            </div>
+            {watchedProgram && watchedBranch && (
+              <p className="text-xs text-muted-foreground -mt-1">
+                Your college ID will look like <span className="font-mono font-semibold">{previewStudentId(watchedProgram, watchedBranch, watchedYear)}</span> — the last 5 digits are assigned in sequence.
+              </p>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="joiningYear"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Year of Joining</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl><SelectTrigger><SelectValue placeholder="Select year" /></SelectTrigger></FormControl>
+                        <SelectContent>{JOINING_YEARS.map(y => <SelectItem key={y} value={y}>{y}</SelectItem>)}</SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}

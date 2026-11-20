@@ -1,5 +1,6 @@
 
 'use client';
+import { PROGRAMS, BRANCHES } from '@/lib/academic-codes';
 
 import * as React from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -21,18 +22,10 @@ import Link from 'next/link';
 import { PageHeaderActions } from '@/components/layout/layout-context';
 import { ClassroomSummaryDialog } from '@/components/admin/classes/classroom-summary-dialog';
 
-const programs = ["All", "B.Tech", "MBA", "Law", "MBBS", "B.Sc", "B.Com"];
+const programs = ["All", ...PROGRAMS];
 const years = ["All", "1", "2", "3", "4", "5"];
 const semesters = ["All", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
-const branches: Record<string, string[]> = {
-    "All": [],
-    "B.Tech": ["CSE", "ECE", "MECH", "IT", "AI&ML", "DS", "CIVIL", "Other"],
-    "MBA": ["Marketing", "Finance", "HR", "Operations", "General", "Other"],
-    "Law": ["Corporate Law", "Criminal Law", "Civil Law", "General", "Other"],
-    "MBBS": ["General Medicine"],
-    "B.Sc": ["Physics", "Chemistry", "Mathematics", "Computer Science", "Other"],
-    "B.Com": ["General", "Accounting & Finance", "Taxation", "Other"],
-};
+const branches: Record<string, string[]> = { "All": [], ...BRANCHES };
 
 export type ClassUI = {
     id: string;
@@ -129,7 +122,7 @@ export default function AdminClassesPage() {
             if (filterSection !== "All" && cls.section !== filterSection) return false;
             if (filterSearch) {
                 const search = filterSearch.toLowerCase();
-                return cls.courseName.toLowerCase().includes(search) || cls.courseId.toLowerCase().includes(search);
+                return (cls.courseName || '').toLowerCase().includes(search) || (cls.courseId || '').toLowerCase().includes(search) || (cls.teacherName || '').toLowerCase().includes(search);
             }
             return true;
         });

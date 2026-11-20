@@ -133,11 +133,9 @@ export default function AdminProgramCoursesPage() {
             <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-blue-600 to-sky-500 p-6 mb-6 text-white shadow-lg">
               <div className="relative z-10 flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                    <Link href="/admin/courses" passHref>
-                        <Button variant="outline" size="icon" aria-label="Back to Programs" className="border-white/30 text-white hover:bg-white/10 bg-white/10 backdrop-blur-sm">
+                    <Button asChild variant="outline" size="icon" aria-label="Back to Programs" className="border-white/30 text-white hover:bg-white/10 bg-white/10 backdrop-blur-sm"><Link href="/admin/courses">
                             <ArrowLeft className="h-4 w-4" />
-                        </Button>
-                    </Link>
+                        </Link></Button>
                     <div>
                       <h1 className="text-2xl font-bold tracking-tight">{programName} Courses</h1>
                       <p className="text-white/70 text-sm mt-1">Manage courses and student sections for this program</p>

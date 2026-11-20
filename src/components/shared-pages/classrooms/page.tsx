@@ -126,7 +126,7 @@ function InfoDialog({ isOpen, onOpenChange, classroom }: { isOpen: boolean, onOp
                 <div className="space-y-2 py-4 text-sm">
                     <p><strong>Owner:</strong> {classroom.ownerName}</p>
                     <p><strong>Created:</strong> {classroom.createdAt ? formatDate(classroom.createdAt, { dateStyle: 'full' }) : 'N/A'}</p>
-                    <p><strong>Participants:</strong> {classroom.memberUids?.length || 0}</p>
+                    <p><strong>Participants:</strong> {classroom.memberCount ?? classroom.memberUids?.length ?? 0}</p>
                     <p><strong>Invite Code:</strong> <span className="font-mono bg-muted p-1 rounded">{classroom.inviteCode}</span></p>
                     <p><strong>Status:</strong> <span className="text-green-600 font-semibold">Active</span></p>
                 </div>
@@ -269,7 +269,7 @@ export function ClassroomsPage({ basePath, mode = 'auto' }: { basePath: string; 
                             <CardContent className="flex-grow">
                                 <div className="text-sm text-muted-foreground">
                                     <p>Teacher: {room.ownerName || 'N/A'}</p>
-                                    <p>Members: {room.memberUids?.length || 0}</p>
+                                    <p>Members: {room.memberCount ?? room.memberUids?.length ?? 0}</p>
                                 </div>
                             </CardContent>
                             <CardFooter>

@@ -1,7 +1,6 @@
 'use client';
 
 import * as React from 'react';
-import { supabase } from '@/lib/supabase-client';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,6 +18,7 @@ import {
   submitAssignment,
   listSubmissions,
   getMySubmission,
+  getMySubmissionsForClassroom,
   gradeSubmission,
   type ClassroomAssignment,
   type ClassroomSubmission,
@@ -238,16 +238,12 @@ function SubmitDialog({
                 )}
               </div>
               <div className="flex items-center gap-2">
-                <a href={`https://docs.google.com/viewer?url=${encodeURIComponent(existingSubmission.fileUrl)}&embedded=true`} target="_blank" rel="noopener noreferrer">
-                  <Button variant="outline" size="sm" className="h-7 gap-1">
+                <Button asChild variant="outline" size="sm" className="h-7 gap-1"><a href={`https://docs.google.com/viewer?url=${encodeURIComponent(existingSubmission.fileUrl)}&embedded=true`} target="_blank" rel="noopener noreferrer">
                     <Eye className="h-3 w-3" /> View Document
-                  </Button>
-                </a>
-                <a href={existingSubmission.fileUrl} download={existingSubmission.fileName || 'submission'}>
-                  <Button variant="ghost" size="sm" className="h-7 gap-1">
+                  </a></Button>
+                <Button asChild variant="ghost" size="sm" className="h-7 gap-1"><a href={existingSubmission.fileUrl} download={existingSubmission.fileName || 'submission'}>
                     <Download className="h-3 w-3" /> Download
-                  </Button>
-                </a>
+                  </a></Button>
               </div>
             </div>
           )}
@@ -404,16 +400,12 @@ function SubmissionsPanel({
                             <span className="truncate">{sub.fileName || 'Submitted file'}</span>
                           </div>
                           <div className="flex items-center gap-2">
-                            <a href={`https://docs.google.com/viewer?url=${encodeURIComponent(sub.fileUrl)}&embedded=true`} target="_blank" rel="noopener noreferrer">
-                              <Button variant="outline" size="sm" className="h-7 gap-1">
+                            <Button asChild variant="outline" size="sm" className="h-7 gap-1"><a href={`https://docs.google.com/viewer?url=${encodeURIComponent(sub.fileUrl)}&embedded=true`} target="_blank" rel="noopener noreferrer">
                                 <Eye className="h-3 w-3" /> View Document
-                              </Button>
-                            </a>
-                            <a href={sub.fileUrl} download={sub.fileName || 'submission'}>
-                              <Button variant="ghost" size="sm" className="h-7 gap-1">
+                              </a></Button>
+                            <Button asChild variant="ghost" size="sm" className="h-7 gap-1"><a href={sub.fileUrl} download={sub.fileName || 'submission'}>
                                 <Download className="h-3 w-3" /> Download
-                              </Button>
-                            </a>
+                              </a></Button>
                           </div>
                         </div>
                       ) : (
@@ -463,14 +455,11 @@ export function ClassworkTab({ classroomId, userId, userName, userRole }: Classw
       const data = await listAssignments(classroomId);
       setAssignments(data);
 
-      // For students, fetch their submission status
+      // For students: all their submissions in one round trip
       if (userRole === 'student') {
+        const mine = await getMySubmissionsForClassroom(classroomId);
         const subs: Record<string, ClassroomSubmission | null> = {};
-        await Promise.all(
-          data.map(async (a) => {
-            subs[a.id] = await getMySubmission(a.id, userId);
-          })
-        );
+        data.forEach((a) => { subs[a.id] = mine[a.id] ?? null; });
         setMySubmissions(subs);
       }
     } catch {
@@ -484,45 +473,13 @@ export function ClassworkTab({ classroomId, userId, userName, userRole }: Classw
     load().finally(() => setIsLoading(false));
   }, [load]);
 
-  // Polling — uses direct Supabase client reads (not server actions) to avoid
-  // overwhelming the Next.js server with POST requests every few seconds.
+  // Light background refresh while the tab is visible.
   React.useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        const { data } = await supabase
-          .from('classroom_assignments')
-          .select('*')
-          .eq('classroomId', classroomId)
-          .order('createdAt', { ascending: false });
-        if (!data) return;
-        setAssignments((prev) => {
-          const prevIds = prev.map((a) => a.id).join(',');
-          const newIds = data.map((a: any) => a.id).join(',');
-          if (prevIds === newIds) return prev;
-          return data as ClassroomAssignment[];
-        });
-
-        if (userRole === 'student') {
-          const subs: Record<string, ClassroomSubmission | null> = {};
-          await Promise.all(
-            (data as ClassroomAssignment[]).map(async (a) => {
-              const { data: sub } = await supabase
-                .from('classroom_submissions')
-                .select('*')
-                .eq('assignmentId', a.id)
-                .eq('studentId', userId)
-                .maybeSingle();
-              subs[a.id] = sub as ClassroomSubmission | null;
-            })
-          );
-          setMySubmissions(subs);
-        }
-      } catch {
-        // Silently ignore polling errors
-      }
-    }, 5000);
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') load().catch(() => {});
+    }, 30000);
     return () => clearInterval(interval);
-  }, [classroomId, userId, userRole]);
+  }, [load]);
 
   const handleDelete = async (assignment: ClassroomAssignment) => {
     const result = await deleteAssignment(assignment.id, userId);

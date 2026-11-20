@@ -56,6 +56,7 @@ const iconMap: IconMap = {
   UserCheck: Icons.UserCheck,
   Bell: Icons.Bell,
   Utensils: Icons.Utensils,
+  AlertTriangle: Icons.AlertTriangle,
 };
 
 

@@ -18,10 +18,12 @@ import { AddStaffDialog } from '@/components/admin/staff/add-staff-dialog';
 import type { ScheduleEntry } from '@/lib/types';
 
 interface TeacherProfileClientPageProps {
+    /** Portal this page lives in, so navigation stays inside it. */
+    basePath?: '/admin' | '/employee';
     initialTeacherData: FullTeacherData;
 }
 
-export function TeacherProfileClientPage({ initialTeacherData }: TeacherProfileClientPageProps) {
+export function TeacherProfileClientPage({ initialTeacherData, basePath = '/admin' }: TeacherProfileClientPageProps) {
     const router = useRouter();
     const { toast } = useToast();
     const [teacherData] = React.useState<FullTeacherData>(initialTeacherData);
@@ -39,7 +41,7 @@ export function TeacherProfileClientPage({ initialTeacherData }: TeacherProfileC
 
         if (result.success) {
             toast({ title: "Teacher Deleted", description: result.message });
-            router.push('/admin/teachers');
+            router.push(basePath === '/admin' ? '/admin/staff' : '/employee/teachers');
         } else {
             toast({ variant: "destructive", title: "Deletion Failed", description: result.error });
         }
@@ -167,8 +169,7 @@ export function TeacherProfileClientPage({ initialTeacherData }: TeacherProfileC
                                     {coursesAssigned.map((course: any) => (
                                         <TableRow
                                             key={course.id || (course.code + course.class)}
-                                            onClick={() => router.push(`/teacher/attendance?classId=${course.id}`)}
-                                            className="cursor-pointer hover:bg-indigo-50/50 dark:hover:bg-indigo-950/20 border-border/20"
+                                            className="hover:bg-indigo-50/50 dark:hover:bg-indigo-950/20 border-border/20"
                                         >
                                             <TableCell>{course.code}</TableCell>
                                             <TableCell className="font-medium">{course.name}</TableCell>
@@ -182,7 +183,7 @@ export function TeacherProfileClientPage({ initialTeacherData }: TeacherProfileC
                             <p className="text-muted-foreground text-center py-4">No courses currently assigned.</p>
                         )}
                         <div className="pt-4 text-right">
-                            <Button variant="outline" size="sm" onClick={handleManageCourses}>Manage Course Assignments</Button>
+                            {basePath === '/admin' && <Button variant="outline" size="sm" onClick={handleManageCourses}>Manage Course Assignments</Button>}
                         </div>
                     </CardContent>
                 </Card>

@@ -1,5 +1,6 @@
 
 "use client";
+import { PROGRAMS, BRANCHES } from '@/lib/academic-codes';
 
 import * as React from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
@@ -17,15 +18,6 @@ import { getStudentsForFeeFiltering, recordAdminPayment, getStudentFeeDetails, F
 import { PageHeaderActions } from "@/components/layout/layout-context";
 import { cn } from "@/lib/utils";
 
-const PROGRAMS = ["B.Tech", "MBA", "Law", "MBBS", "B.Sc", "B.Com"];
-const BRANCHES: Record<string, string[]> = {
-    "B.Tech": ["CSE", "ECE", "MECH", "IT", "AI&ML", "DS", "CIVIL", "Other"],
-    "MBA": ["Marketing", "Finance", "HR", "Operations", "General", "Other"],
-    "Law": ["Corporate Law", "Criminal Law", "Civil Law", "General", "Other"],
-    "MBBS": ["General Medicine"],
-    "B.Sc": ["Physics", "Chemistry", "Mathematics", "Computer Science", "Biotechnology", "Other"],
-    "B.Com": ["General", "Accounting & Finance", "Taxation", "Corporate Secretaryship", "Other"],
-};
 const YEARS = ["1", "2", "3", "4"];
 const SECTIONS = ["A", "B", "C", "D"];
 

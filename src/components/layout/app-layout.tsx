@@ -24,7 +24,6 @@ import { ThemeToggle } from "./theme-toggle";
 import { usePathname, useRouter } from "next/navigation";
 import type { AppUser } from "@/hooks/useAuthProtection";
 import { LayoutProvider, useLayout } from "./layout-context";
-import ChatBot from "@/components/shared/chat-bot";
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -40,6 +39,7 @@ const studentNavItems: NavItem[] = [
   { href: "/student/classrooms", label: "Classrooms", icon: "BookOpen" },
   { href: "/student/attendance", label: "Attendance", icon: "CalendarCheck" },
   { href: "/student/marks", label: "Marks", icon: "BarChart3" },
+  { href: "/student/backlogs", label: "Backlogs", icon: "AlertTriangle" },
   { href: "/student/exams", label: "Exams", icon: "ClipboardCheck" },
   { href: "/student/fees", label: "Fees", icon: "IndianRupee" },
   { href: "/student/hostel", label: "Hostel", icon: "Home" },
@@ -60,6 +60,7 @@ const adminNavItems: NavItem[] = [
   { href: "/admin/hostels", label: "Hostels", icon: "Home", color: "163, 230, 53" },
   { href: "/admin/attendance", label: "Overall Attendance", icon: "ClipboardCheck", color: "250, 204, 21" },
   { href: "/admin/marks", label: "Overall Marks", icon: "Edit", color: "251, 191, 36" },
+  { href: "/admin/backlogs", label: "Backlogs", icon: "AlertTriangle", color: "248, 113, 113" },
   { href: "/admin/exams", label: "Exam Schedules", icon: "CalendarCog", color: "251, 146, 60" },
   { href: "/admin/opportunities", label: "Opportunities", icon: "Briefcase", color: "251, 113, 133" },
   { href: "/admin/library", label: "Library Catalog", icon: "Library", color: "244, 114, 182" },
@@ -95,6 +96,7 @@ const employeeNavItems: NavItem[] = [
   { href: "/employee/exams/classes", label: "Classes", icon: "Library", color: "34, 211, 238" },
   { href: "/employee/exams/schedule", label: "Exam Schedules", icon: "CalendarCog", color: "251, 146, 60" },
   { href: "/employee/exams/marks", label: "Enter Marks", icon: "Edit", color: "251, 191, 36" },
+  { href: "/employee/exams/backlogs", label: "Backlogs", icon: "AlertTriangle", color: "248, 113, 113" },
   { href: "/employee/exams/timetables", label: "Timetables", icon: "CalendarClock", color: "45, 212, 191" },
   { href: "/employee/library", label: "Library", icon: "Library", color: "34, 211, 238" },
   { href: "/employee/notifications", label: "Notifications", icon: "Bell", color: "251, 191, 36" },
@@ -127,7 +129,7 @@ function AppLayoutInternal({ children, role, user, onLogout, pageHeaderActions: 
       break;
     case 'employee':
       navItems = employeeNavItems.filter(item => {
-        if (item.href === '/employee/settings' || item.href === '/employee/dashboard') return true;
+        if (item.href === '/employee/settings' || item.href === '/employee/dashboard' || item.href === '/employee/notifications') return true;
         if (user.type === 'fee_management' && item.href === '/employee/fees') return true;
         if (user.type === 'hostel_management' && (item.href === '/employee/hostel' || item.href === '/employee/hostel/fees' || item.href === '/employee/hostel/menu')) return true;
         if (user.type === 'student_staff_management' && (item.href === '/employee/users' || item.href === '/employee/students' || item.href === '/employee/teachers')) return true;
@@ -137,6 +139,7 @@ function AppLayoutInternal({ children, role, user, onLogout, pageHeaderActions: 
           item.href === '/employee/exams/classes' ||
           item.href === '/employee/exams/schedule' ||
           item.href === '/employee/exams/marks' ||
+          item.href === '/employee/exams/backlogs' ||
           item.href === '/employee/exams/timetables'
         )) return true;
         if (user.type === 'library_management' && item.href === '/employee/library') return true;
@@ -150,6 +153,8 @@ function AppLayoutInternal({ children, role, user, onLogout, pageHeaderActions: 
         if (item.href === '/student/hostel' && user.role === 'student') {
           return user.type === 'Hosteler';
         }
+        // Backlogs appear only for students who currently have at least one.
+        if (item.href === '/student/backlogs') return (user.backlogCount || 0) > 0;
         return true;
       });
       break;
@@ -265,7 +270,6 @@ function AppLayoutInternal({ children, role, user, onLogout, pageHeaderActions: 
         <main id="main-content" className="flex-1 overflow-auto p-4 sm:p-5 md:p-8" role="main">
           {children}
         </main>
-        <ChatBot role={role} userName={user?.name || 'User'} />
       </SidebarInset>
     </SidebarProvider>
   );

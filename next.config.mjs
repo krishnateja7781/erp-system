@@ -1,17 +1,15 @@
-
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Explicitly tell Next.js this app uses server-rendered pages.
-  // This complements the `force-dynamic` route segment config on all
-  // authenticated routes, ensuring nothing is statically prerendered
-  // with missing environment variables.
+  // Self-contained server bundle (Docker / any Node host).
   output: 'standalone',
 
-  // Suppress specific third-party library warnings that don't affect runtime.
   serverExternalPackages: ['@supabase/ssr'],
 
-  // Security: prevent the app from being embedded in an iframe
-  // (protects against clickjacking attacks).
+  experimental: {
+    // Bulk attendance / CSV uploads can exceed the 1 MB default.
+    serverActions: { bodySizeLimit: '10mb' },
+  },
+
   async headers() {
     return [
       {
@@ -19,19 +17,15 @@ const nextConfig = {
         headers: [
           { key: 'X-Frame-Options', value: 'DENY' },
           { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
         ],
       },
     ];
   },
 
-  // Suppress noisy ESLint warnings during `next build` that don't
-  // indicate actual runtime bugs (e.g. in third-party packages).
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
-  typescript: {
-    ignoreBuildErrors: true,
-  },
+  // Type errors must fail the build — never ship code that doesn't typecheck.
+  typescript: { ignoreBuildErrors: false },
 };
 
 export default nextConfig;

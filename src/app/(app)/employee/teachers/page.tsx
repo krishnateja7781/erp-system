@@ -12,8 +12,10 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Search, Users, Loader2, Mail, Building, Briefcase, Eye, MoreHorizontal } from "lucide-react";
 import { getStaff } from '@/actions/staff-actions';
 import { useToast } from '@/hooks/use-toast';
+import { useRouter } from 'next/navigation';
 
 export default function EmployeeTeachersPage() {
+  const router = useRouter();
   const { toast } = useToast();
   const [teachers, setTeachers] = React.useState<any[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -146,7 +148,7 @@ export default function EmployeeTeachersPage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end" className="w-40">
-                            <DropdownMenuItem className="gap-2 cursor-pointer">
+                            <DropdownMenuItem className="gap-2 cursor-pointer" onClick={() => router.push(`/employee/teachers/${t.id}`)}>
                               <Eye className="h-4 w-4" /> View Details
                             </DropdownMenuItem>
                           </DropdownMenuContent>

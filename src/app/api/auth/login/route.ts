@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { createServiceRoleClient } from '@/lib/supabase'
 import { createClient } from '@supabase/supabase-js'
+import { withinRateLimit } from '@/lib/rate-limit'
 
 export async function POST(request: NextRequest) {
   const body = await request.json()
@@ -9,6 +10,12 @@ export async function POST(request: NextRequest) {
 
   if (!email || !password) {
     return NextResponse.json({ error: 'Email and password are required.' }, { status: 400 })
+  }
+
+  // Brute-force protection: per network and per account.
+  const normalizedEmail = String(email).trim().toLowerCase()
+  if (!(await withinRateLimit('login', 30, 600)) || !(await withinRateLimit('login-email', 10, 600, normalizedEmail))) {
+    return NextResponse.json({ error: 'Too many sign-in attempts. Please wait a few minutes and try again.' }, { status: 429 })
   }
 
   const response = NextResponse.json({ success: true }) // temporary — will rebuild below
@@ -76,6 +83,17 @@ export async function POST(request: NextRequest) {
       { status: 403 }
     )
   }
+
+  // Record the sign-in (admin dashboard "recent logins"); never block login on it.
+  await adminSupabase
+    .from('login_events')
+    .insert({
+      user_id: authData.user.id,
+      role: profile.role,
+      ip_address: (request.headers.get('x-forwarded-for') || '').split(',')[0].trim() || null,
+      user_agent: (request.headers.get('user-agent') || '').slice(0, 300) || null,
+    })
+    .then(({ error }) => { if (error) console.error('[login] could not record login event:', error.message) })
 
   // Return the role so the client can decide where to redirect
   // The session cookies are already set in `response.cookies` above

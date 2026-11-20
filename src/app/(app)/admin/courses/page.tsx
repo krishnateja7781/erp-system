@@ -1,5 +1,6 @@
 
 'use client';
+import { PROGRAMS } from '@/lib/academic-codes';
 
 import * as React from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
@@ -11,7 +12,6 @@ import { CourseDialog } from '@/components/admin/courses/course-dialog';
 import { getGroupedCourses } from '@/actions/course-actions';
 
 // Define the top-level programs available in the institution.
-const PROGRAMS = ["B.Tech", "MBA", "Law", "MBBS", "B.Sc", "B.Com"];
 
 export default function AdminCoursesProgramSelectionPage() {
     const { toast } = useToast();
@@ -54,11 +54,9 @@ export default function AdminCoursesProgramSelectionPage() {
                                          </CardDescription>
                                     </CardHeader>
                                     <CardFooter>
-                                        <Link href={`/admin/courses/${encodeURIComponent(program)}`} passHref className="w-full">
-                                            <Button className="w-full">
+                                        <Button asChild className="w-full"><Link href={`/admin/courses/${encodeURIComponent(program)}`} className="w-full">
                                                View Courses
-                                            </Button>
-                                        </Link>
+                                            </Link></Button>
                                     </CardFooter>
                                 </Card>
                             ))}

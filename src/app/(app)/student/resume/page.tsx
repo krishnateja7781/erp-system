@@ -17,21 +17,13 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 
 import { resumeSchema, type ResumeFormValues } from '@/lib/resume-schema';
+import { getMyResume, saveMyResume } from '@/actions/resume-actions';
+import { Save, Loader2 } from 'lucide-react';
 
+// Empty starting point; real values are loaded from the student's record / saved resume.
 const defaultResumeValues: ResumeFormValues = {
-  name: "Your Name",
-  role: "Your Role / Title",
-  photoUrl: "https://placehold.co/150x150.png",
-  phone: "+91 12345 67890",
-  email: "your.email@example.com",
-  address: "Your City, Country",
-  linkedIn: "linkedin.com/in/yourprofile",
-  github: "github.com/yourusername",
-  objective: "A brief and compelling statement about your career aspirations and the value you bring to a potential employer.",
-  education: [{ degree: "B.Tech in Computer Science", institution: "EduSphere Institute of Technology", year: "2021 - 2025", cgpa: "8.5" }],
-  skills: [{ value: "React" }, { value: "Node.js" }, { value: "TypeScript" }, { value: "Firebase" }, { value: "Next.js" }],
-  projects: [{ title: "Academic ERP System", description: "Developed a comprehensive ERP system for educational institutions using Next.js and Firebase.", technologies: "Next.js, TypeScript, Firebase, TailwindCSS" }],
-  achievements: [{ value: "Winner, National Level Hackathon 2024" }, { value: "Published a paper on AI in Education" }],
+  name: '', role: '', photoUrl: '', phone: '', email: '', address: '', linkedIn: '', github: '', objective: '',
+  education: [], skills: [], projects: [], achievements: [],
 };
 
 type BuilderStep = 'select-style' | 'select-template' | 'build';
@@ -101,6 +93,45 @@ export default function ResumeBuilderPage() {
     defaultValues: defaultResumeValues,
     mode: 'onChange',
   });
+
+  const [isSaving, setIsSaving] = React.useState(false);
+  const [savedAt, setSavedAt] = React.useState<string | null>(null);
+
+  // Load the saved resume (or a draft prefilled from the student's record).
+  React.useEffect(() => {
+    getMyResume()
+      .then((r) => {
+        form.reset(r.values);
+        setShowPhoto(r.showPhoto);
+        setSavedAt(r.savedAt);
+        if (r.templateId) {
+          const style = (Object.keys(templates) as ResumeStyle[]).find((k) => templates[k].some((t) => t.id === r.templateId));
+          if (style) {
+            setSelectedStyle(style);
+            setSelectedTemplate(r.templateId);
+            setStep('build');
+          }
+        }
+      })
+      .catch(() => toast({ variant: 'destructive', title: 'Error', description: 'Could not load your resume.' }));
+  }, [form, toast]);
+
+  const handleSave = async () => {
+    const valid = await form.trigger();
+    if (!valid) {
+      toast({ variant: 'destructive', title: 'Check your resume', description: 'Some required fields are missing or invalid.' });
+      return;
+    }
+    setIsSaving(true);
+    const res = await saveMyResume(form.getValues(), selectedTemplate || 'modern-sidebar', showPhoto);
+    setIsSaving(false);
+    if (res.success) {
+      setSavedAt(new Date().toISOString());
+      toast({ title: 'Saved', description: 'Your resume has been saved.' });
+    } else {
+      toast({ variant: 'destructive', title: 'Save failed', description: res.error });
+    }
+  };
 
   const handleSelectStyle = (style: ResumeStyle) => {
     setSelectedStyle(style);
@@ -196,6 +227,9 @@ export default function ResumeBuilderPage() {
                       <Switch id="show-photo" checked={showPhoto} onCheckedChange={setShowPhoto} />
                       <Label htmlFor="show-photo" className="flex items-center gap-1"><ImageIcon className="h-4 w-4" /> Photo</Label>
                     </div>
+                    <Button type="button" variant="outline" onClick={handleSave} disabled={isSaving} className="gap-2" title={savedAt ? `Last saved ${new Date(savedAt).toLocaleString()}` : 'Not saved yet'}>
+                      {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save
+                    </Button>
                     <Button onClick={handleDownloadPdf} className="gap-2 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-md">
                       <Download className="h-4 w-4" /> Download PDF
                     </Button>

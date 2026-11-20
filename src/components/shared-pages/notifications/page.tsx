@@ -10,7 +10,75 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import { getNotificationsForUser, markNotificationRead, markAllNotificationsRead } from '@/actions/notification-actions';
+import { getMyNotifications, markNotificationRead, markAllNotificationsRead, broadcastNotification } from '@/actions/notification-actions';
+import { getMyProfile } from '@/actions/auth-actions';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import type { UserRole } from '@/lib/types';
+
+const AUDIENCES: { value: string; label: string; roles: UserRole[] }[] = [
+  { value: 'all', label: 'Everyone', roles: [] },
+  { value: 'student', label: 'Students', roles: ['student'] },
+  { value: 'teacher', label: 'Teachers', roles: ['teacher'] },
+  { value: 'staff', label: 'Teachers & Staff', roles: ['teacher', 'employee'] },
+];
+
+/** Staff-only composer: one announcement fans out to every matching user in a single SQL statement. */
+function BroadcastComposer() {
+  const { toast } = useToast();
+  const [title, setTitle] = React.useState('');
+  const [message, setMessage] = React.useState('');
+  const [audience, setAudience] = React.useState('all');
+  const [isSending, setIsSending] = React.useState(false);
+
+  const send = async () => {
+    if (!title.trim()) {
+      toast({ variant: 'destructive', title: 'Title required' });
+      return;
+    }
+    setIsSending(true);
+    const roles = AUDIENCES.find((a) => a.value === audience)?.roles ?? [];
+    const result = await broadcastNotification({ title, message, roles, type: 'event' });
+    setIsSending(false);
+    if (result.success) {
+      toast({ title: 'Announcement sent', description: result.message });
+      setTitle('');
+      setMessage('');
+    } else {
+      toast({ variant: 'destructive', title: 'Could not send', description: result.error });
+    }
+  };
+
+  return (
+    <Card className="card-elevated">
+      <CardHeader>
+        <CardTitle className="text-lg">Send an announcement</CardTitle>
+        <CardDescription>Delivered instantly to every user in the selected audience.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-1">
+          <Label htmlFor="bc-title">Title</Label>
+          <Input id="bc-title" value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Campus closed on Friday" />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="bc-message">Message</Label>
+          <Textarea id="bc-message" value={message} maxLength={2000} onChange={(e) => setMessage(e.target.value)} rows={3} />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {AUDIENCES.map((a) => (
+            <Button key={a.value} type="button" size="sm" variant={audience === a.value ? 'default' : 'outline'} onClick={() => setAudience(a.value)}>
+              {a.label}
+            </Button>
+          ))}
+          <Button className="ml-auto" onClick={send} disabled={isSending}>
+            {isSending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Send
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 const getNotificationIcon = (type: NotificationMessage['type']) => {
   switch (type) {
@@ -28,24 +96,16 @@ export function AllNotificationsPage() {
   const router = useRouter();
   const { toast } = useToast();
 
-  React.useEffect(() => {
-    const storedUserString = localStorage.getItem('loggedInUser');
-    if (!storedUserString) {
-      toast({ variant: 'destructive', title: 'Authentication Error', description: 'Please log in to see notifications.' });
-      setIsLoading(false);
-      return;
-    }
-    const user = JSON.parse(storedUserString);
-    if (!user?.uid) { setIsLoading(false); return; }
+  const [canBroadcast, setCanBroadcast] = React.useState(false);
 
-    getNotificationsForUser(user.uid)
+  React.useEffect(() => {
+    getMyProfile().then((me) => setCanBroadcast(me?.role === 'super_admin' || me?.role === 'employee')).catch(() => {});
+    getMyNotifications(100)
       .then((result) => {
         if (result.success && result.data) setNotifications(result.data as NotificationMessage[]);
+        else if (result.error) toast({ variant: 'destructive', title: 'Notification Error', description: result.error });
       })
-      .catch((error) => {
-        console.error('Error fetching notifications:', error);
-        toast({ variant: 'destructive', title: 'Notification Error', description: 'Could not fetch notifications.' });
-      })
+      .catch(() => toast({ variant: 'destructive', title: 'Notification Error', description: 'Could not fetch notifications.' }))
       .finally(() => setIsLoading(false));
   }, [toast]);
 
@@ -63,7 +123,7 @@ export function AllNotificationsPage() {
     const unreadIds = notifications.filter((n) => !n.read).map((n) => n.id);
     if (unreadIds.length === 0) return;
     try {
-      await markAllNotificationsRead(unreadIds);
+      await markAllNotificationsRead();
       setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
       toast({ title: 'All Read', description: 'All notifications marked as read.' });
     } catch (error) {
@@ -92,6 +152,7 @@ export function AllNotificationsPage() {
         </div>
         <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2" />
       </div>
+      {canBroadcast && <BroadcastComposer />}
       <Card className="card-elevated">
         <CardHeader>
           <CardTitle className="flex items-center gap-3 text-2xl">

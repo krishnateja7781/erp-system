@@ -1,5 +1,6 @@
 
 'use client';
+import { PROGRAMS, BRANCHES } from '@/lib/academic-codes';
 
 import * as React from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -14,15 +15,8 @@ import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
 import { saveCourse, type Course, type CoursePayload } from '@/actions/course-actions';
 
-const programs = ["B.Tech", "MBA", "Law", "MBBS", "B.Sc", "B.Com"];
-const branches: Record<string, string[]> = {
-    "B.Tech": ["CSE", "ECE", "MECH", "IT", "AI&ML", "DS", "CIVIL", "Other"],
-    "MBA": ["Marketing", "Finance", "HR", "Operations", "General", "Other"],
-    "Law": ["Corporate Law", "Criminal Law", "Civil Law", "General", "Other"],
-    "MBBS": ["General Medicine"],
-    "B.Sc": ["Physics", "Chemistry", "Mathematics", "Computer Science", "Other"],
-    "B.Com": ["General", "Accounting & Finance", "Taxation", "Other"],
-};
+const programs = [...PROGRAMS];
+const branches: Record<string, string[]> = { ...BRANCHES };
 const semesters = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
 
 const formSchema = z.object({

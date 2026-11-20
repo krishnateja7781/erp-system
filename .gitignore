@@ -3,7 +3,6 @@
 
 # Dependencies
 /node_modules
-/erp-mobile/node_modules
 /.pnp
 .pnp.js
 
@@ -36,12 +35,7 @@ pnpm-debug.log*
 logs
 *.log.*
 
-# Firebase
-firebase-service-account-key.json # If you were to use a file path for admin SDK
-*.firebase.*
 
-# IDX specific (if any - typically handled by IDX itself)
-# .idx/
 
 # Turbopack
 .turbo

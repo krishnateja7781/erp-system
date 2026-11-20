@@ -1,335 +1,337 @@
 'use server';
 
-import { createServiceRoleClient as createServerSupabaseClient } from '@/lib/supabase';
+import { createServiceRoleClient } from '@/lib/supabase';
+import { authorize, requireRole, requireStudentAccess, pinToSelf, isUuid } from '@/lib/auth-guard';
+import { fetchAllRows } from '@/lib/db';
 import type { ActionResult } from '@/lib/types';
 
+const EXAM_ADMINS = ['emp:exam_marks_management'] as const;
+
+function mapExam(e: any) {
+  return {
+    id: e.id,
+    courseId: e.courses?.code || e.course_id,
+    courseName: e.courses?.name,
+    program: e.program || e.courses?.program,
+    branch: e.branch || e.courses?.branch,
+    semester: e.semester,
+    year: e.year,
+    examType: e.exam_type,
+    examSessionName: e.exam_type || 'Exam',
+    courseCode: e.courses?.code,
+    date: e.exam_date,
+    startTime: e.start_time,
+    endTime: e.end_time,
+    room: e.room || null,
+    status: e.status || 'Scheduled',
+    maxInternalMarks: e.max_internal_marks ?? null,
+    maxExternalMarks: e.max_external_marks ?? null,
+    credits: e.courses?.credits ?? null,
+  };
+}
+
 export async function getExamSchedules(): Promise<any[]> {
-    const supabase = await createServerSupabaseClient();
-    
-    const { data, error } = await supabase.from('exams').select('*, courses(*)').order('exam_date', { ascending: false });
-    if (error || !data) return [];
-    
-    return data.map((e: any) => ({
-        id: e.id,
-        courseId: e.courses?.code || e.course_id,
-        courseName: e.courses?.name,
-        program: e.courses?.program || e.program,
-        branch: e.courses?.branch || e.branch,
-        semester: e.semester,
-        year: e.year,
-        examType: e.exam_type,
-        examSessionName: e.exam_type || e.exam_session_name || 'Exam',
-        courseCode: e.courses?.code,
-        date: e.exam_date,
-        startTime: e.start_time,
-        endTime: e.end_time,
-        status: e.status || 'Scheduled',
-        maxInternalMarks: e.max_internal_marks ?? null,
-        maxExternalMarks: e.max_external_marks ?? null,
-        credits: e.courses?.credits ?? null,
-    }));
+  await requireRole(...EXAM_ADMINS, 'emp:student_staff_management');
+  const admin = await createServiceRoleClient();
+  const data = await fetchAllRows(() =>
+    admin.from('exams').select('*, courses(code, name, program, branch, credits)').order('exam_date', { ascending: false }),
+  );
+  return data.map(mapExam);
 }
 
 export async function deleteExamSchedule(examId: string): Promise<ActionResult> {
-    const supabase = await createServerSupabaseClient();
-    const { error } = await supabase.from('exams').delete().eq('id', examId);
-    if (error) return { success: false, error: error.message };
-    return { success: true, message: 'Exam schedule deleted successfully.' };
+  const auth = await authorize(...EXAM_ADMINS);
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!isUuid(examId)) return { success: false, error: 'Invalid exam.' };
+  const admin = await createServiceRoleClient();
+  const { error } = await admin.from('exams').delete().eq('id', examId);
+  if (error) return { success: false, error: error.message };
+  return { success: true, message: 'Exam schedule deleted successfully.' };
 }
 
-// ── Student-facing types ───────────────────────────────────────────────────────
+// ── Student-facing ─────────────────────────────────────────────────────────────
 
 export type ExamStatus = 'Upcoming' | 'Ongoing' | 'Completed';
 
 export interface StudentExamScheduleEntry {
-    id: string;
-    examSessionName: string;
-    courseName: string;
-    courseCode: string;
-    date: string;
-    startTime: string;
-    endTime: string;
-    room: string;
-    status: ExamStatus;
+  id: string;
+  examSessionName: string;
+  courseName: string;
+  courseCode: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  room: string;
+  status: ExamStatus;
 }
 
 export interface HallTicketData {
-    studentId: string;
-    studentName: string;
-    collegeId: string;
-    program: string;
-    branch: string;
-    semester: number;
-    examSessionName: string;
-    exams: StudentExamScheduleEntry[];
-    photoUrl?: string;
+  studentId: string;
+  studentName: string;
+  collegeId: string;
+  studentCollegeId: string;
+  program: string;
+  branch: string;
+  semester: number;
+  year: number;
+  examSessionName: string;
+  hallTicketNumber?: string;
+  exams: StudentExamScheduleEntry[];
+  photoUrl?: string;
+  studentPhotoUrl?: string;
+  instructions?: string;
+  controllerSignaturePlaceholder?: string;
+  generatedDate: string;
 }
 
-// ── Get Student Exam Schedules ─────────────────────────────────────────────────
-
-export async function getStudentExamSchedules(program: string, branch: string): Promise<StudentExamScheduleEntry[]> {
-    const supabase = await createServerSupabaseClient();
-
-    const { data, error } = await supabase
-        .from('exams')
-        .select('*, courses(name, code, program, branch, semester)')
-        .eq('program', program)
-        .eq('branch', branch)
-        .order('exam_date', { ascending: true });
-
-    if (error || !data) return [];
-
-    const now = new Date();
-
-    return (data as any[]).map(e => {
-        const examDate = e.exam_date ? new Date(e.exam_date) : null;
-        let status: ExamStatus = 'Upcoming';
-        if (examDate) {
-            if (examDate < now) status = 'Completed';
-        }
-
-        return {
-            id: e.id,
-            examSessionName: e.exam_type || 'Exam',
-            courseName: e.courses?.name || 'Unknown Course',
-            courseCode: e.courses?.code || '',
-            date: e.exam_date || '',
-            startTime: e.start_time || '',
-            endTime: e.end_time || '',
-            room: e.room || 'TBA',
-            status,
-        };
-    });
+function examStatus(date: string | null, start: string | null, end: string | null): ExamStatus {
+  if (!date) return 'Upcoming';
+  const today = new Date().toISOString().slice(0, 10);
+  if (date > today) return 'Upcoming';
+  if (date < today) return 'Completed';
+  const nowTime = new Date().toTimeString().slice(0, 8);
+  if (start && nowTime < start) return 'Upcoming';
+  if (end && nowTime > end) return 'Completed';
+  return 'Ongoing';
 }
 
-// ── Get Hall Ticket for Student ────────────────────────────────────────────────
+/** Exam timetable for a program/branch — scoped to the student's current semester when a student calls it. */
+export async function getStudentExamSchedules(program: string, branch: string, semester?: number): Promise<StudentExamScheduleEntry[]> {
+  const caller = await requireRole();
+  const admin = await createServiceRoleClient();
 
+  let sem = semester;
+  if (caller.role === 'student') {
+    const { data: me } = await admin.from('students').select('program, branch, current_semester').eq('profile_id', caller.userId).maybeSingle();
+    if (!me) return [];
+    program = me.program;
+    branch = me.branch;
+    sem = me.current_semester;
+  }
+
+  let q = admin
+    .from('exams')
+    .select('id, exam_type, exam_date, start_time, end_time, room, status, courses(name, code)')
+    .eq('program', program)
+    .eq('branch', branch)
+    .neq('status', 'Cancelled')
+    .order('exam_date', { ascending: true })
+    .limit(500);
+  if (sem) q = q.eq('semester', sem);
+  const { data } = await q;
+
+  return ((data || []) as any[]).map((e) => ({
+    id: e.id,
+    examSessionName: e.exam_type || 'Exam',
+    courseName: e.courses?.name || 'Unknown Course',
+    courseCode: e.courses?.code || '',
+    date: e.exam_date || '',
+    startTime: e.start_time || '',
+    endTime: e.end_time || '',
+    room: e.room || 'TBA',
+    status: examStatus(e.exam_date, e.start_time, e.end_time),
+  }));
+}
+
+/**
+ * Hall ticket for the student's nearest upcoming exam session (IA-1 / IA-2 / SEE …),
+ * issued only when the session's configured attendance and fee rules are met.
+ */
 export async function getHallTicket(
-    studentId: string,
-    program: string,
-    branch: string,
-    semester: number,
-    studentName: string,
-    collegeId: string,
-    photoUrl?: string
+  studentId: string, program: string, branch: string, semester: number, studentName: string, collegeId: string, photoUrl?: string,
 ): Promise<{ success: boolean; data?: HallTicketData; error?: string }> {
-    try {
-        const exams = await getStudentExamSchedules(program, branch);
+  try {
+    const { studentId: sid } = await requireStudentAccess(studentId);
+    const admin = await createServiceRoleClient();
+    const { data: s } = await admin
+      .from('students')
+      .select('college_id, program, branch, current_semester, current_year, profiles(full_name, profile_picture_url)')
+      .eq('id', sid)
+      .single();
+    if (!s) return { success: false, error: 'Student not found.' };
 
-        if (!exams.length) {
-            return { success: false, error: 'No upcoming exams found for your program.' };
-        }
+    const upcoming = (await getStudentExamSchedules(s.program, s.branch, s.current_semester)).filter((e) => e.status !== 'Completed');
+    if (!upcoming.length) return { success: false, error: `No upcoming exams found for semester ${s.current_semester}.` };
 
-        return {
-            success: true,
-            data: {
-                studentId,
-                studentName,
-                collegeId,
-                program,
-                branch,
-                semester,
-                examSessionName: exams.length > 0 ? exams[0].examSessionName : 'Exam Session',
-                exams,
-                photoUrl,
-            }
-        };
-    } catch (e: any) {
-        return { success: false, error: e.message || 'Failed to generate hall ticket.' };
+    const session = upcoming[0].examSessionName;
+    const { data: elig } = await admin.rpc('get_student_exam_eligibility', { p_student_id: sid, p_exam_type: session });
+    const rule = Array.isArray(elig) ? elig[0] : elig;
+    if (rule && rule.is_eligible === false) {
+      return { success: false, error: `Hall ticket withheld for ${session}: ${(rule.reasons || []).join('; ')}` };
     }
+
+    const photo = (s as any).profiles?.profile_picture_url || photoUrl;
+    return {
+      success: true,
+      data: {
+        studentId: sid,
+        studentName: (s as any).profiles?.full_name || studentName,
+        collegeId: s.college_id || collegeId,
+        studentCollegeId: s.college_id || collegeId,
+        program: s.program || program,
+        branch: s.branch || branch,
+        semester: s.current_semester || semester,
+        year: s.current_year,
+        examSessionName: session,
+        hallTicketNumber: rule?.hall_ticket_no || undefined,
+        exams: upcoming.filter((e) => e.examSessionName === session),
+        photoUrl: photo,
+        studentPhotoUrl: photo,
+        instructions: rule?.instructions || undefined,
+        controllerSignaturePlaceholder: rule?.controller_signature || undefined,
+        generatedDate: new Date().toISOString(),
+      },
+    };
+  } catch (e: any) {
+    return { success: false, error: e.message || 'Failed to generate hall ticket.' };
+  }
 }
 
-// BUG FIX #9: Implement getExamById (was stub returning null)
 export async function getExamById(examId: string): Promise<any> {
-    if (!examId) return null;
-    const supabase = await createServerSupabaseClient();
-    const { data, error } = await supabase
-        .from('exams')
-        .select('*, courses(name, code, program, branch, semester, credits)')
-        .eq('id', examId)
-        .single();
-    if (error || !data) return null;
-    return {
-        id: data.id,
-        courseId: data.courses?.code || data.course_id,
-        courseName: data.courses?.name,
-        program: data.courses?.program || data.program,
-        branch: data.courses?.branch || data.branch,
-        semester: data.semester,
-        year: data.year,
-        examType: data.exam_type,
-        examSessionName: data.exam_type || 'Exam',
-        courseCode: data.courses?.code,
-        date: data.exam_date,
-        startTime: data.start_time,
-        endTime: data.end_time,
-        status: data.status || 'Scheduled',
-        maxInternalMarks: data.max_internal_marks ?? null,
-        maxExternalMarks: data.max_external_marks ?? null,
-        credits: data.courses?.credits ?? null,
-    };
+  await requireRole('teacher', ...EXAM_ADMINS);
+  if (!isUuid(examId)) return null;
+  const admin = await createServiceRoleClient();
+  const { data } = await admin
+    .from('exams')
+    .select('*, courses(name, code, program, branch, semester, credits)')
+    .eq('id', examId)
+    .maybeSingle();
+  return data ? mapExam(data) : null;
 }
 
 export interface StudentEligibility {
-    id: string;
-    studentId: string;
-    name: string;
-    collegeId: string;
-    section: string;
-    attendancePercentage: number;
-    feeBalance: number;
-    isEligible: boolean;
-    reasons: string[];
+  id: string;
+  studentId: string;
+  name: string;
+  collegeId: string;
+  section: string;
+  attendancePercentage: number;
+  feeBalance: number;
+  feePaidPercent?: number;
+  isEligible: boolean;
+  reasons: string[];
 }
 
-// BUG FIX #9: Implement getTeacherExamStudents (was stub returning [])
-export async function getTeacherExamStudents(examId: string, teacherId: string): Promise<StudentEligibility[]> {
-    if (!examId) return [];
-    const supabase = await createServerSupabaseClient();
-
-    // Get the exam details to know which program/branch/semester it targets
-    const exam = await getExamById(examId);
-    if (!exam) return [];
-
-    // Get students in that program/branch/semester
-    const { data: students, error } = await supabase
-        .from('students')
-        .select('id, college_id, section, profiles(full_name)')
-        .eq('program', exam.program)
-        .eq('branch', exam.branch)
-        .eq('current_semester', exam.semester)
-        .eq('is_graduated', false);
-
-    if (error || !students) return [];
-
-    const results: StudentEligibility[] = [];
-    for (const s of students as any[]) {
-        const reasons: string[] = [];
-
-        // Attendance check
-        const { data: attRecs } = await supabase
-            .from('attendance')
-            .select('status')
-            .eq('student_id', s.id);
-
-        const totalAtt = attRecs?.length || 0;
-        const presentAtt = attRecs?.filter((a: any) => a.status === 'Present').length || 0;
-        const attPct = totalAtt > 0 ? Math.round((presentAtt / totalAtt) * 100) : 0;
-
-        if (attPct < 75) {
-            reasons.push(`Attendance ${attPct}% below required 75%`);
-        }
-
-        // Fee balance check
-        const { data: feeRecs } = await supabase
-            .from('fees')
-            .select('balance')
-            .eq('student_id', s.id);
-        const feeBalance = feeRecs?.reduce((sum: number, f: any) => sum + (f.balance || 0), 0) || 0;
-        if (feeBalance > 0) {
-            reasons.push(`Outstanding fee balance: ₹${feeBalance.toLocaleString()}`);
-        }
-
-        results.push({
-            id: s.id,
-            studentId: s.id,
-            name: s.profiles?.full_name || 'Unknown',
-            collegeId: s.college_id,
-            section: s.section || 'A',
-            attendancePercentage: attPct,
-            feeBalance,
-            isEligible: reasons.length === 0,
-            reasons,
-        });
-    }
-
-    return results;
+/** Eligibility for every student sitting an exam — computed in one set-based SQL call. */
+export async function getTeacherExamStudents(examId: string, _teacherId?: string): Promise<StudentEligibility[]> {
+  await requireRole('teacher', ...EXAM_ADMINS);
+  if (!isUuid(examId)) return [];
+  const admin = await createServiceRoleClient();
+  // Uses the session's configured hall-ticket rules (exam_sessions).
+  const { data, error } = await admin.rpc('get_exam_eligibility', { p_exam_id: examId, p_min_attendance: null });
+  if (error || !data) return [];
+  return (data as any[]).map((r) => ({
+    id: r.student_id,
+    studentId: r.student_id,
+    name: r.full_name || 'Unknown',
+    collegeId: r.college_id,
+    section: r.section || 'A',
+    attendancePercentage: Number(r.attendance_pct) || 0,
+    feeBalance: Number(r.fee_balance) || 0,
+    feePaidPercent: Number(r.fee_paid_pct) || 0,
+    isEligible: !!r.is_eligible,
+    reasons: r.reasons || [],
+  }));
 }
+
 export async function getTeacherExams(teacherId: string): Promise<any[]> {
-    const supabase = await createServerSupabaseClient();
-    
-    // Resolve the internal DB UUID for the teacher from their auth profile ID
-    const { data: teacher } = await supabase.from('teachers').select('id').eq('profile_id', teacherId).single();
-    if (!teacher) return [];
-    
-    // Fetch all courses assigned to this teacher via their classes
-    const { data: clsData } = await supabase.from('classes').select('course_id').eq('teacher_id', teacher.id);
-    if (!clsData || clsData.length === 0) return [];
-    const courseIds = clsData.map(c => c.course_id);
-    
-    // Fetch exams for those courses
-    const { data, error } = await supabase
-        .from('exams')
-        .select('*, courses(name, code)')
-        .in('course_id', courseIds)
-        .order('exam_date', { ascending: false });
-        
-    if (error || !data) return [];
-    
-    return data.map((e: any) => ({
-        id: e.id,
-        examSessionName: e.exam_type || 'Exam',
-        courseName: e.courses?.name || 'Subject',
-        courseCode: e.courses?.code || '',
-        program: e.program,
-        branch: e.branch,
-        semester: e.semester,
-        year: e.year,
-        date: e.exam_date,
-        startTime: e.start_time,
-        endTime: e.end_time,
-        status: e.status || 'Scheduled'
-    }));
-}
-export async function scheduleExamsAndSetupHallTickets(config: { filters: any; exams: any[]; hallTicketData: any }): Promise<any> {
-    const supabase = await createServerSupabaseClient();
-    
-    try {
-        const inserts = [];
-        for (const exam of config.exams) {
-            // Locate the UUID for the course using its code
-            const { data: c } = await supabase.from('courses').select('id').eq('code', exam.courseCode).single();
-            if (c) {
-                inserts.push({
-                    course_id: c.id,
-                    program: config.filters.program,
-                    branch: config.filters.branch,
-                    year: config.filters.year,
-                    academic_year: new Date().getFullYear().toString(),
-                    semester: config.filters.semester,
-                    exam_type: config.hallTicketData.examSessionName,
-                    exam_date: exam.date,
-                    start_time: exam.startTime,
-                    end_time: exam.endTime,
-                    status: 'Scheduled'
-                });
-            }
-        }
-        
-        if (inserts.length > 0) {
-            const { error } = await supabase.from('exams').insert(inserts);
-            if (error) return { success: false, error: error.message };
-        }
-        
-        return { success: true, message: 'Exams scheduled successfully.' };
-    } catch (err: any) {
-        return { success: false, error: err.message || 'Failed to schedule exams' };
-    }
+  const caller = await requireRole('teacher', ...EXAM_ADMINS);
+  const admin = await createServiceRoleClient();
+  const { data: teacher } = await admin.from('teachers').select('id').eq('profile_id', pinToSelf(caller, teacherId)).maybeSingle();
+  if (!teacher) return [];
+
+  const { data: cls } = await admin.from('classes').select('course_id').eq('teacher_id', teacher.id);
+  const courseIds = Array.from(new Set((cls || []).map((c: any) => c.course_id)));
+  if (courseIds.length === 0) return [];
+
+  const { data } = await admin
+    .from('exams')
+    .select('*, courses(name, code)')
+    .in('course_id', courseIds)
+    .order('exam_date', { ascending: false })
+    .limit(500);
+  return ((data || []) as any[]).map((e) => ({ ...mapExam(e), courseName: e.courses?.name || 'Subject' }));
 }
 
-export async function saveExamSchedule(examId: string, schedule: any[]): Promise<any> {
-    const supabase = await createServerSupabaseClient();
-    const updateData = schedule[0];
-    const payload: any = {
-        exam_date: updateData.date,
-        start_time: updateData.startTime,
-        end_time: updateData.endTime,
+/** Creates one exam row per course in a single insert; the DB notifies affected students once per session. */
+export async function scheduleExamsAndSetupHallTickets(config: { filters: any; exams: any[]; hallTicketData: any }): Promise<ActionResult> {
+  const auth = await authorize(...EXAM_ADMINS);
+  if (!auth.ok) return { success: false, error: auth.error };
+  const { filters, exams, hallTicketData } = config || ({} as any);
+  if (!filters?.program || !filters?.branch || !filters?.semester || !Array.isArray(exams) || exams.length === 0) {
+    return { success: false, error: 'Program, branch, semester and at least one exam are required.' };
+  }
+
+  const admin = await createServiceRoleClient();
+  const codes = Array.from(new Set(exams.map((e) => e.courseCode).filter(Boolean)));
+  const { data: courses } = await admin.from('courses').select('id, code').in('code', codes);
+  const courseByCode = new Map((courses || []).map((c: any) => [c.code, c.id]));
+
+  const missing = codes.filter((c) => !courseByCode.has(c));
+  if (missing.length) return { success: false, error: `Unknown course code(s): ${missing.join(', ')}` };
+
+  const badTime = exams.find((e) => e.startTime && e.endTime && e.startTime >= e.endTime);
+  if (badTime) return { success: false, error: `End time must be after start time for ${badTime.courseCode}.` };
+  const rows = exams.map((e) => {
+    return {
+      course_id: courseByCode.get(e.courseCode),
+      program: filters.program,
+      branch: filters.branch,
+      year: Number(filters.year) || null,
+      academic_year: String(new Date().getFullYear()),
+      semester: Number(filters.semester),
+      exam_type: hallTicketData?.examSessionName || 'Exam',
+      exam_date: e.date,
+      start_time: e.startTime || null,
+      end_time: e.endTime || null,
+      room: e.room || null,
+      status: 'Scheduled',
+      created_by: auth.caller.userId,
     };
-    if (updateData.examSessionName) {
-         payload.exam_type = updateData.examSessionName;
-    }
-    const { error } = await supabase.from('exams').update(payload).eq('id', examId);
-    if (error) return { success: false, error: error.message };
-    return { success: true, message: 'Schedule updated' };
+  });
+
+  // Persist the hall-ticket rules for this session (one row per program/branch/semester/session/year).
+  const pct = (v: unknown, fallback: number) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : fallback;
+  };
+  const { error: sessErr } = await admin.from('exam_sessions').upsert(
+    {
+      program: filters.program,
+      branch: filters.branch,
+      semester: Number(filters.semester),
+      exam_type: hallTicketData?.examSessionName || 'Exam',
+      academic_year: String(new Date().getFullYear()),
+      min_attendance: pct(hallTicketData?.minAttendance, 75),
+      min_fee_paid_percent: pct(hallTicketData?.minFeePaidPercent, 0),
+      instructions: hallTicketData?.instructions || null,
+      controller_signature: hallTicketData?.controllerSignaturePlaceholder || null,
+      created_by: auth.caller.userId,
+    },
+    { onConflict: 'program,branch,semester,exam_type,academic_year' },
+  );
+  if (sessErr) return { success: false, error: sessErr.message };
+
+  const { error } = await admin.from('exams').insert(rows);
+  if (error) {
+    if (error.code === '23505') return { success: false, error: 'One of these courses already has an exam of this type scheduled.' };
+    return { success: false, error: error.message };
+  }
+  return { success: true, message: `${rows.length} exam(s) scheduled successfully.` };
 }
 
+export async function saveExamSchedule(examId: string, schedule: any[]): Promise<ActionResult> {
+  const auth = await authorize(...EXAM_ADMINS);
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!isUuid(examId) || !schedule?.[0]) return { success: false, error: 'Invalid exam.' };
+  const u = schedule[0];
+  const payload: Record<string, unknown> = { exam_date: u.date, start_time: u.startTime || null, end_time: u.endTime || null };
+  if (u.examSessionName) payload.exam_type = u.examSessionName;
+  if (u.room !== undefined) payload.room = u.room || null;
+  if (u.status) payload.status = u.status;
+
+  const admin = await createServiceRoleClient();
+  const { error } = await admin.from('exams').update(payload).eq('id', examId);
+  if (error) return { success: false, error: error.message };
+  return { success: true, message: 'Schedule updated' };
+}

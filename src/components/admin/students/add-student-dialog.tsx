@@ -1,6 +1,7 @@
 
 
 'use client';
+import { PROGRAMS, BRANCHES, previewStudentId } from '@/lib/academic-codes';
 
 import *
   as React from 'react';
@@ -15,18 +16,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, UserPlus } from 'lucide-react';
 import { createStudentAccount, updateStudent } from '@/actions/student-actions';
-import { generatePassword, getProgramCode, getBranchCode } from '@/lib/utils';
+import { generatePassword } from '@/lib/utils';
 import type { Student } from '@/lib/types';
 
-const programs = ["B.Tech", "MBA", "Law", "MBBS", "B.Sc", "B.Com"];
-const branches: Record<string, string[]> = {
-  "B.Tech": ["CSE", "ECE", "MECH", "IT", "AI&ML", "DS", "CIVIL", "Other"],
-  "MBA": ["Marketing", "Finance", "HR", "Operations", "General", "Other"],
-  "Law": ["Corporate Law", "Criminal Law", "Civil Law", "General", "Other"],
-  "MBBS": ["General Medicine"],
-  "B.Sc": ["Physics", "Chemistry", "Mathematics", "Computer Science", "Other"],
-  "B.Com": ["General", "Accounting & Finance", "Taxation", "Other"],
-};
+const programs = [...PROGRAMS];
+const branches: Record<string, string[]> = { ...BRANCHES };
 const years = ["1", "2", "3", "4", "5"];
 const semesters = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"];
 const studentStatuses = ["Active", "Inactive", "Graduated", "Pending Approval", "Suspended", "Dropped Out"];
@@ -190,7 +184,7 @@ export function AddStudentDialog({ isOpen, onOpenChange, onSave, initialData }: 
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>College ID (Example)</FormLabel>
-                        <FormControl><Input placeholder="Auto-generated" {...field} value={getProgramCode(watchedProgram) + (watchedBatch?.match(/^\d{4}/)?.[0].substring(2) || 'XX') + getBranchCode(watchedBranch, watchedProgram) + '0001 (Example)'} readOnly className="bg-muted/50" /></FormControl>
+                        <FormControl><Input placeholder="Auto-generated" {...field} value={watchedProgram && watchedBranch ? `${previewStudentId(watchedProgram, watchedBranch, watchedBatch)} (next serial assigned on save)` : 'Select program and branch'} readOnly className="bg-muted/50" /></FormControl>
                       </FormItem>
                     )}
                   />

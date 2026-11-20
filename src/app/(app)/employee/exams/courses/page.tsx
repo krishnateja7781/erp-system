@@ -1,5 +1,6 @@
 
 'use client';
+import { PROGRAMS } from '@/lib/academic-codes';
 
 import * as React from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
@@ -9,7 +10,6 @@ import Link from 'next/link';
 import { useToast } from '@/hooks/use-toast';
 import { CourseDialog } from '@/components/admin/courses/course-dialog';
 
-const PROGRAMS = ["B.Tech", "MBA", "Law", "MBBS", "B.Sc", "B.Com"];
 
 export default function EmployeeCoursesPage() {
     const { toast } = useToast();
@@ -58,9 +58,7 @@ export default function EmployeeCoursesPage() {
                                     </CardDescription>
                                 </CardHeader>
                                 <CardFooter>
-                                    <Link href={`/employee/exams/courses/${encodeURIComponent(program)}`} passHref className="w-full">
-                                        <Button className="w-full">View Courses</Button>
-                                    </Link>
+                                    <Button asChild className="w-full"><Link href={`/employee/exams/courses/${encodeURIComponent(program)}`} className="w-full">View Courses</Link></Button>
                                 </CardFooter>
                             </Card>
                         ))}

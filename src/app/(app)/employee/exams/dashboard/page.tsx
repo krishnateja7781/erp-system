@@ -14,7 +14,7 @@ import {
     CartesianGrid, PieChart, Pie, Cell, Legend
 } from 'recharts';
 import { getExamSchedules } from '@/actions/exam-actions';
-import { getMarksRecords } from '@/actions/marks-actions';
+import { getMarksOverview } from '@/actions/marks-actions';
 import { getClassesWithDetails } from '@/actions/class-actions';
 import { getGroupedCourses } from '@/actions/course-actions';
 import type { ExamSchedule } from '@/lib/types';
@@ -49,26 +49,15 @@ export default function EmployeeExamsDashboardPage() {
         setIsLoading(true);
         setError(null);
         try {
-            const [exams, marksResult, classes, groupedCourses] = await Promise.all([
+            const [exams, marksOverview, classes, groupedCourses] = await Promise.all([
                 getExamSchedules(),
-                getMarksRecords(),
+                getMarksOverview(),
                 getClassesWithDetails(),
                 getGroupedCourses(),
             ]);
 
-            const marks = marksResult.success ? (marksResult.data || []) : [];
-
-            // Grade distribution
-            const gradeCounts: Record<string, number> = {};
-            marks.forEach(m => {
-                if (m.grade) gradeCounts[m.grade] = (gradeCounts[m.grade] || 0) + 1;
-            });
-            const gradeDist = Object.entries(gradeCounts)
-                .map(([grade, count]) => ({ grade, count }))
-                .sort((a, b) => {
-                    const order = ['O', 'A+', 'A', 'B+', 'B', 'C+', 'C', 'P', 'FAIL'];
-                    return order.indexOf(a.grade) - order.indexOf(b.grade);
-                });
+            // Grade distribution (aggregated in SQL, ordered O → F)
+            const gradeDist = marksOverview.gradeDistribution;
 
             // Exam status distribution
             const statusCounts: Record<string, number> = {};
@@ -102,7 +91,7 @@ export default function EmployeeExamsDashboardPage() {
                 scheduledExams: exams.filter(e => e.status === 'Scheduled').length,
                 totalClasses: classes.length,
                 totalCourses,
-                marksEntered: marks.filter(m => m.internals !== null || m.externals !== null).length,
+                marksEntered: marksOverview.marksEntered,
                 gradeDist,
                 examStatusDist,
                 recentExams,

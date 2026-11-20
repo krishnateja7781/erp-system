@@ -1,4 +1,5 @@
 import { getBooks } from '@/actions/library-actions';
+import { MyLoans } from '@/components/library/my-loans';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { BookOpen } from 'lucide-react';
@@ -18,6 +19,8 @@ export default async function LibraryPage() {
           </p>
         </div>
       </div>
+
+      <MyLoans />
 
       {books.length === 0 ? (
         <Card className="flex flex-col items-center justify-center p-12 text-center border-dashed">

@@ -1,181 +1,169 @@
-'use server'
+'use server';
 
-import { createServerSupabaseClient, createServiceRoleClient } from '@/lib/supabase'
-import { revalidatePath } from 'next/cache'
-import { redirect } from 'next/navigation'
-import { Profile } from '@/lib/types'
-import { createStudentAccount } from './student-actions'
+import { createServerSupabaseClient, createServiceRoleClient } from '@/lib/supabase';
+import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
+import type { Profile } from '@/lib/types';
+import { getCaller } from '@/lib/auth-guard';
+import { createStudentRecord } from '@/lib/accounts';
+import { withinRateLimit } from '@/lib/rate-limit';
+import { PROGRAMS, BRANCHES } from '@/lib/academic-codes';
 
 export async function signInAction(formData: FormData) {
-  const email = formData.get('email') as string
-  const password = formData.get('password') as string
-  const supabase = await createServerSupabaseClient()
+  const email = String(formData.get('email') || '').trim().toLowerCase();
+  const password = String(formData.get('password') || '');
+  if (!email || !password) return { data: null, error: 'Email and password are required.' };
 
-  const { error } = await supabase.auth.signInWithPassword({
-    email,
-    password,
-  })
+  const supabase = await createServerSupabaseClient();
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) return { data: null, error: error.message };
 
-  if (error) {
-    return { data: null, error: error.message }
-  }
-
-  revalidatePath('/', 'layout')
-  return { data: { success: true }, error: null }
+  revalidatePath('/', 'layout');
+  return { data: { success: true }, error: null };
 }
 
 export async function signOutAction() {
-  const supabase = await createServerSupabaseClient()
-  await supabase.auth.signOut()
-  revalidatePath('/', 'layout')
-  redirect('/login')
+  const supabase = await createServerSupabaseClient();
+  await supabase.auth.signOut();
+  revalidatePath('/', 'layout');
+  redirect('/login');
 }
 
+/**
+ * Returns the authenticated session + profile. Uses getUser() (re-validates the
+ * JWT with Supabase) rather than trusting the cookie contents.
+ */
 export async function getSession() {
-  const supabase = await createServerSupabaseClient()
-  // Use getUser() not getSession() — getUser() re-validates the JWT with Supabase servers
-  // which is more secure and ensures the session is genuinely valid server-side.
-  const { data: { user }, error } = await supabase.auth.getUser()
-  
-  if (error || !user) {
-    return { data: null, error: error?.message || 'No session found' }
-  }
-  
-  const { data: profile, error: profileDbError } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', user.id)
-    .single()
-
-  if (profileDbError || !profile) {
-    return { data: null, error: `DB Error: ${profileDbError?.message || 'No rows returned for profile.'}. UserID: ${user.id}` }
-  }
-    
-  let userType = null;
-  if (profile.role === 'student') {
-     const adminSupabase = await createServiceRoleClient();
-     const { data: std } = await adminSupabase.from('students').select('is_hosteler').eq('profile_id', user.id).single();
-     userType = std?.is_hosteler ? 'Hosteler' : 'Day Scholar';
-  } else if (profile.role === 'employee') {
-     const adminSupabase = await createServiceRoleClient();
-     const { data: emp } = await adminSupabase.from('employees').select('employee_type').eq('profile_id', user.id).single();
-     userType = emp?.employee_type || null;
-  }
-    
-  return { 
-    data: { 
-      session: { user },
-      profile: profile as Profile | null,
-      userType
-    }, 
-    error: null 
-  }
-}
-
-/** Returns the current user's profile id, name and role from the server session — no localStorage needed. */
-export async function getMyProfile(): Promise<{ uid: string; name: string; role: string } | null> {
   const supabase = await createServerSupabaseClient();
   const { data: { user }, error } = await supabase.auth.getUser();
-  if (error || !user) return null;
+  if (error || !user) return { data: null, error: error?.message || 'No session found' };
 
-  const { data: profile } = await supabase
+  const admin = await createServiceRoleClient();
+  const { data: profile, error: profileDbError } = await admin
     .from('profiles')
-    .select('full_name, role')
+    .select('id, role, full_name, first_name, last_name, email, phone, dob, id_code, profile_picture_url, notification_enabled, created_at, updated_at')
     .eq('id', user.id)
-    .single();
+    .maybeSingle();
 
-  if (!profile) return null;
+  if (profileDbError || !profile) {
+    return { data: null, error: 'Your account has no profile. Please contact the administrator.' };
+  }
 
-  // Fetch real name from the role-specific table for teachers/students
-  let name = profile.full_name || '';
-  if (!name || name.trim() === '') {
-    if (profile.role === 'teacher') {
-      const { data: t } = await supabase.from('teachers').select('name').eq('profile_id', user.id).single();
-      if (t?.name) name = t.name;
-    } else if (profile.role === 'student') {
-      const { data: s } = await supabase.from('students').select('name').eq('profile_id', user.id).single();
-      if (s?.name) name = s.name;
-    } else if (profile.role === 'employee' || profile.role === 'admin') {
-      const { data: e } = await supabase.from('employees').select('name').eq('profile_id', user.id).single();
-      if (e?.name) name = e.name;
+  let userType: string | null = null;
+  let backlogCount = 0;
+  if (profile.role === 'student') {
+    const { data: std } = await admin.from('students').select('id, is_hosteler').eq('profile_id', user.id).maybeSingle();
+    userType = std?.is_hosteler ? 'Hosteler' : 'Day Scholar';
+    if (std?.id) {
+      const { count } = await admin.from('backlogs').select('id', { count: 'exact', head: true }).eq('student_id', std.id).eq('status', 'Active');
+      backlogCount = count || 0;
+    }
+  } else if (profile.role === 'employee') {
+    const { data: emp } = await admin.from('employees').select('employee_type').eq('profile_id', user.id).maybeSingle();
+    userType = emp?.employee_type || null;
+  }
+
+  return {
+    data: {
+      session: { user: { id: user.id, email: user.email ?? null } },
+      profile: { ...profile, avatar_url: profile.profile_picture_url } as Profile & Record<string, any>,
+      userType,
+      backlogCount,
+    },
+    error: null,
+  };
+}
+
+/** The caller's id, display name and role. */
+export async function getMyProfile(): Promise<{ uid: string; name: string; role: string } | null> {
+  const caller = await getCaller();
+  if (!caller) return null;
+  return { uid: caller.userId, name: caller.fullName, role: caller.role };
+}
+
+export async function resetPassword(email: string) {
+  if (!email) return { data: null, error: 'Email is required.' };
+  if (!(await withinRateLimit('reset', 5, 3600))) return { data: null, error: 'Too many requests. Please try again later.' };
+  const supabase = await createServerSupabaseClient();
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+  const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+    redirectTo: `${appUrl}/auth/callback?next=/update-password`,
+  });
+  if (error) console.error('[resetPassword]', error.message);
+  return { data: 'If an account exists for that email, reset instructions have been sent.', error: null };
+}
+
+/** A user may read their own profile; staff may read anyone's. */
+export async function getProfile(userId: string) {
+  const caller = await getCaller();
+  if (!caller) return { data: null, error: 'Not authenticated.' };
+  if (caller.userId !== userId && caller.role === 'student') return { data: null, error: 'Not authorized.' };
+
+  const admin = await createServiceRoleClient();
+  const { data, error } = await admin.from('profiles').select('*').eq('id', userId).maybeSingle();
+  if (error || !data) return { data: null, error: error?.message || 'Profile not found.' };
+  return { data: data as Profile, error: null };
+}
+
+/**
+ * Super-admin registration.
+ * - Bootstrap: allowed without a session ONLY while no super admin exists.
+ * - Afterwards: only an existing super admin may create another one.
+ */
+export async function adminSelfRegister(data: any) {
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return { success: false, error: 'Server is missing SUPABASE_SERVICE_ROLE_KEY. Add it to .env.local and restart.' };
+  }
+  if (!(await withinRateLimit('admin-signup', 5, 3600))) {
+    return { success: false, error: 'Too many attempts. Please try again later.' };
+  }
+  const admin = await createServiceRoleClient();
+
+  const { count: existingAdmins } = await admin
+    .from('profiles')
+    .select('id', { count: 'exact', head: true })
+    .eq('role', 'super_admin');
+  if ((existingAdmins || 0) > 0) {
+    const caller = await getCaller();
+    if (caller?.role !== 'super_admin') {
+      return { success: false, error: 'Super admin registration is closed. Ask an existing super admin to create your account.' };
     }
   }
 
-  return { uid: user.id, name: name || user.email || 'User', role: profile.role };
-}
-
-
-export async function resetPassword(email: string) {
-  const supabase = await createServerSupabaseClient()
-  const redirectUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
-  
-  const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${redirectUrl}/update-password`,
-  })
-
-  if (error) {
-    return { data: null, error: error.message }
-  }
-  
-  return { data: "Password reset instructions sent to email", error: null }
-}
-
-export async function getProfile(userId: string) {
-  const supabase = await createServerSupabaseClient()
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', userId)
-    .single()
-    
-  if (error) {
-    return { data: null, error: error.message }
-  }
-  
-  return { data: data as Profile, error: null }
-}
-
-export async function adminSelfRegister(data: any) {
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    return { success: false, error: "Setup Error: You must add SUPABASE_SERVICE_ROLE_KEY to your .env.local file in order to register an admin. Restart the server after adding it!" }
+  const email = String(data?.email || '').trim().toLowerCase();
+  const password = String(data?.password || '');
+  const firstName = String(data?.firstName || '').trim();
+  const lastName = String(data?.lastName || '').trim();
+  if (!email || password.length < 6 || !firstName) {
+    return { success: false, error: 'Name, valid email and a password of at least 6 characters are required.' };
   }
 
-  const adminSupabase = await createServiceRoleClient()
-  
-  const { data: authData, error: authError } = await adminSupabase.auth.admin.createUser({
-    email: data.email,
-    password: data.password,
-    email_confirm: true,
-  })
-  
-  if (authError) return { success: false, error: authError.message }
-  
-  const userId = authData.user.id
-  const fullName = `${data.firstName} ${data.lastName}`.trim()
-  
-  const yearCode = new Date().getFullYear().toString().slice(-2);
-  const employeeCode = `SUP${yearCode}ADM${String(Date.now()).slice(-4)}`;
+  const { data: authData, error: authError } = await admin.auth.admin.createUser({ email, password, email_confirm: true });
+  if (authError) return { success: false, error: authError.message };
+  const userId = authData.user.id;
 
-  const { error: profileError } = await adminSupabase.from('profiles').insert({
+  const { data: employeeCode, error: seqErr } = await admin.rpc('generate_staff_code', { p_role: 'super_admin', p_join_year: new Date().getFullYear() });
+  if (seqErr || typeof employeeCode !== 'string') {
+    await admin.auth.admin.deleteUser(userId);
+    return { success: false, error: `Database not initialised: ${seqErr?.message || 'generator unavailable'}` };
+  }
+
+  const { error: profileError } = await admin.from('profiles').insert({
     id: userId,
     role: 'super_admin',
-    full_name: fullName,
-    first_name: data.firstName,
-    last_name: data.lastName,
-    email: data.email,
+    full_name: `${firstName} ${lastName}`.trim(),
+    first_name: firstName,
+    last_name: lastName || null,
+    email,
     phone: data.phone || null,
     id_code: employeeCode,
-    initial_password: data.password
-  })
-  
+  });
   if (profileError) {
-    await adminSupabase.auth.admin.deleteUser(userId)
-    return { success: false, error: profileError.message }
+    await admin.auth.admin.deleteUser(userId);
+    return { success: false, error: profileError.message };
   }
 
-  // Insert super admin into the employees table with employee_type = 'super_admin'
-
-  const { error: empError } = await adminSupabase.from('employees').insert({
+  const { error: empError } = await admin.from('employees').insert({
     profile_id: userId,
     employee_code: employeeCode,
     employee_type: 'super_admin',
@@ -183,20 +171,45 @@ export async function adminSelfRegister(data: any) {
     designation: 'Super Administrator',
     dob: data.dob || null,
     phone: data.phone || null,
-    status: 'Active'
-  })
+    status: 'Active',
+  });
+  if (empError) console.error('[adminSelfRegister] employee row failed (non-fatal):', empError.message);
 
-  if (empError) {
-    console.error("Super Admin employee record insertion failed:", empError)
-    // Non-fatal: profile exists and role is set — they can still log in
-  }
-  
-  return { success: true, message: 'Super Admin successfully registered!' }
+  return { success: true, message: 'Super Admin successfully registered!' };
 }
 
+/**
+ * Public student self-registration. Only identity fields are accepted from the
+ * form; academic placement (program/branch/semester) is completed by an admin.
+ */
 export async function studentSelfRegister(data: any): Promise<any> {
-    const response = await createStudentAccount(data);
-    return response;
+  if (!(await withinRateLimit('signup', 5, 3600))) {
+    return { success: false, error: 'Too many registrations from this network. Please try again later.' };
+  }
+  const email = String(data?.email || '').trim();
+  if (!/^\S+@\S+\.\S+$/.test(email)) return { success: false, error: 'A valid email is required.' };
+  if (String(data?.password || '').length < 6) return { success: false, error: 'Password must be at least 6 characters.' };
+  if (!String(data?.firstName || '').trim()) return { success: false, error: 'First name is required.' };
+
+  if (!PROGRAMS.includes(data?.program) || !(BRANCHES[data.program] || []).includes(data?.branch)) {
+    return { success: false, error: 'Please choose a valid program and branch.' };
+  }
+  const year = parseInt(String(data?.joiningYear ?? ''), 10);
+  const thisYear = new Date().getFullYear();
+  if (!Number.isInteger(year) || year < thisYear - 10 || year > thisYear) return { success: false, error: 'Invalid year of joining.' };
+
+  // The college ID is always generated (ENG26CS00442); self-registration cannot pick one.
+  return createStudentRecord({
+    firstName: data?.firstName,
+    lastName: data?.lastName,
+    email: data?.email,
+    password: data?.password,
+    gender: data?.gender,
+    program: data.program,
+    branch: data.branch,
+    batch: year,
+    semester: 1,
+    year: 1,
+    status: 'Pending Approval', // an admin verifies and activates self-registered students
+  });
 }
-
-

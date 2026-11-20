@@ -1,188 +1,151 @@
-
 'use server';
 
-import { createServerSupabaseClient } from '@/lib/supabase';
+import { randomInt } from 'crypto';
+import { createServiceRoleClient } from '@/lib/supabase';
+import { authorize, requireRole, isUuid } from '@/lib/auth-guard';
+import { canAccessClassroom } from '@/lib/classroom-access';
+import { chunk } from '@/lib/db';
 import type { Classroom, ActionResult } from '@/lib/types';
 
-function nanoidSimple(len = 6): string {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let result = '';
-    for (let i = 0; i < len; i++) result += chars[Math.floor(Math.random() * chars.length)];
-    return result;
+const INVITE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no ambiguous 0/O/1/I
+
+function inviteCode(len = 7): string {
+  let out = '';
+  for (let i = 0; i < len; i++) out += INVITE_ALPHABET[randomInt(INVITE_ALPHABET.length)];
+  return out;
 }
 
-/** Map a Supabase snake_case row → camelCase Classroom */
-function rowToClassroom(d: any): Classroom {
-    return {
-        id: d.id,
-        name: d.name,
-        section: d.section || '',
-        subject: d.subject || '',
-        ownerId: d.owner_id,
-        ownerName: d.owner_name,
-        memberUids: d.member_uids || [],
-        theme: d.theme || 'theme-0',
-        inviteCode: d.invite_code,
-        googleCourseId: d.google_course_id || null,
-        messages: d.messages || {},
-        createdAt: d.created_at || new Date().toISOString(),
-    } as Classroom;
+function rowToClassroom(d: any, memberUids: string[] = []): Classroom {
+  return {
+    id: d.id,
+    name: d.name,
+    section: d.section || '',
+    subject: d.subject || '',
+    ownerId: d.owner_id,
+    ownerName: d.owner_name,
+    memberUids,
+    inviteCode: d.invite_code,
+    createdAt: d.created_at,
+    ...(d.theme ? { theme: d.theme } : {}),
+    memberCount: typeof d.member_count === 'number' ? d.member_count : memberUids.length,
+  } as Classroom;
 }
 
-interface CreateClassroomPayload { name: string; section?: string; subject?: string; ownerId: string; ownerName: string; }
+interface CreateClassroomPayload { name: string; section?: string; subject?: string; ownerId?: string; ownerName?: string }
 
 export async function createClassroom(payload: CreateClassroomPayload): Promise<ActionResult> {
-    const { name, section, subject, ownerId, ownerName } = payload;
-    if (!name || !ownerId || !ownerName) return { success: false, error: 'Missing required fields.' };
-    try {
-        const supabase = await createServerSupabaseClient();
-        const inviteCode = nanoidSimple();
-        const { data, error } = await supabase.from('classrooms').insert({
-            name,
-            section: section || '',
-            subject: subject || '',
-            owner_id: ownerId,
-            owner_name: ownerName,
-            member_uids: [ownerId],
-            theme: `theme-${Math.floor(Math.random() * 5)}`,
-            invite_code: inviteCode,
-            messages: {},
-        }).select('id').single();
+  const auth = await authorize('teacher');
+  if (!auth.ok) return { success: false, error: auth.error };
+  const name = String(payload?.name || '').trim();
+  if (!name) return { success: false, error: 'Classroom name is required.' };
 
-        if (error) throw error;
-        return { success: true, message: 'Classroom created successfully.', classroomId: data.id };
-    } catch (e: any) {
-        return { success: false, error: e.message || 'Failed to create classroom.' };
+  const admin = await createServiceRoleClient();
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { data, error } = await admin
+      .from('classrooms')
+      .insert({
+        name: name.slice(0, 120),
+        section: (payload.section || '').slice(0, 60),
+        subject: (payload.subject || '').slice(0, 120),
+        owner_id: auth.caller.userId,
+        owner_name: auth.caller.fullName,
+        theme: `theme-${randomInt(5)}`,
+        invite_code: inviteCode(),
+      })
+      .select('id')
+      .single();
+    if (!error) {
+      // The owner membership row is added by the `classrooms_add_owner` trigger.
+      return { success: true, message: 'Classroom created successfully.', classroomId: data.id };
     }
+    if (error.code !== '23505') return { success: false, error: error.message };
+  }
+  return { success: false, error: 'Could not generate a unique invite code. Please retry.' };
 }
 
-interface JoinClassroomPayload { inviteCode: string; studentUid: string; }
-export async function joinClassroom(payload: JoinClassroomPayload): Promise<ActionResult> {
-    const { inviteCode, studentUid } = payload;
-    if (!inviteCode || !studentUid) return { success: false, error: 'Invite code and student user ID are required.' };
-    try {
-        const supabase = await createServerSupabaseClient();
-        const { data: classroom, error } = await supabase
-            .from('classrooms')
-            .select('*')
-            .eq('invite_code', inviteCode.trim())
-            .single();
+/** Idempotent, race-free join: a primary key on (classroom_id, user_id) absorbs duplicate clicks. */
+export async function joinClassroom(payload: { inviteCode: string; studentUid?: string }): Promise<ActionResult> {
+  const auth = await authorize('student');
+  if (!auth.ok) return { success: false, error: auth.error };
+  const code = String(payload?.inviteCode || '').trim().toUpperCase();
+  if (!/^[A-Z0-9]{4,12}$/.test(code)) return { success: false, error: 'Invalid invite code.' };
 
-        if (error || !classroom) return { success: false, error: 'Invalid invite code.' };
-        const memberUids: string[] = classroom.member_uids || [];
-        if (memberUids.includes(studentUid)) return { success: true, message: 'You are already a member of this classroom.', classroomId: classroom.id };
-
-        const { error: updateError } = await supabase
-            .from('classrooms')
-            .update({ member_uids: [...memberUids, studentUid] })
-            .eq('id', classroom.id);
-
-        if (updateError) throw updateError;
-        return { success: true, message: 'Successfully joined the classroom.', classroomId: classroom.id };
-    } catch (e: any) {
-        return { success: false, error: e.message || 'Failed to join classroom due to a server error.' };
-    }
+  const admin = await createServiceRoleClient();
+  const { data, error } = await admin.rpc('join_classroom', { p_invite_code: code, p_user_id: auth.caller.userId });
+  if (error) return { success: false, error: error.message };
+  if (!data?.success) return { success: false, error: data?.error || 'Invalid invite code.' };
+  return {
+    success: true,
+    message: data.already_member ? 'You are already a member of this classroom.' : 'Successfully joined the classroom.',
+    classroomId: data.classroom_id,
+  };
 }
 
-export async function getMyClassrooms(userId: string): Promise<Classroom[]> {
-    if (!userId) return [];
-    try {
-        const supabase = await createServerSupabaseClient();
-        const { data, error } = await supabase
-            .from('classrooms')
-            .select('*')
-            .contains('member_uids', [userId])
-            .order('created_at', { ascending: false });
+export async function getMyClassrooms(_userId?: string): Promise<Classroom[]> {
+  const caller = await requireRole('teacher', 'student');
+  const admin = await createServiceRoleClient();
+  const { data } = await admin
+    .from('classroom_members')
+    .select('classrooms(id, name, section, subject, owner_id, owner_name, invite_code, theme, created_at, member_count)')
+    .eq('user_id', caller.userId)
+    .limit(500);
 
-        if (error || !data) return [];
-        return data.map(rowToClassroom);
-    } catch { return []; }
+  return ((data || []) as any[])
+    .map((r) => r.classrooms)
+    .filter(Boolean)
+    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+    .map((c) => {
+      const room = rowToClassroom(c, []);
+      // Students never see the invite code of rooms they don't own.
+      if (c.owner_id !== caller.userId) room.inviteCode = undefined;
+      return room;
+    });
 }
 
-export async function deleteClassroom(classroomId: string, userId: string): Promise<ActionResult> {
-    if (!classroomId || !userId) return { success: false, error: 'Classroom ID and User ID are required.' };
-    try {
-        const supabase = await createServerSupabaseClient();
-        const { data: classroom, error } = await supabase
-            .from('classrooms')
-            .select('owner_id, name')
-            .eq('id', classroomId)
-            .single();
-
-        if (error || !classroom) return { success: false, error: 'Classroom not found.' };
-        if (classroom.owner_id !== userId) return { success: false, error: 'You are not authorized to delete this classroom.' };
-
-        const { error: delError } = await supabase.from('classrooms').delete().eq('id', classroomId);
-        if (delError) throw delError;
-        return { success: true, message: `Classroom "${classroom.name}" has been deleted.` };
-    } catch (e: any) {
-        return { success: false, error: e.message || 'An unexpected error occurred while deleting the classroom.' };
-    }
+export async function deleteClassroom(classroomId: string, _userId?: string): Promise<ActionResult> {
+  const auth = await authorize('teacher');
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!isUuid(classroomId)) return { success: false, error: 'Invalid classroom.' };
+  const admin = await createServiceRoleClient();
+  const { data: room } = await admin.from('classrooms').select('owner_id, name').eq('id', classroomId).maybeSingle();
+  if (!room) return { success: false, error: 'Classroom not found.' };
+  if (room.owner_id !== auth.caller.userId && auth.caller.role !== 'super_admin') {
+    return { success: false, error: 'You are not authorized to delete this classroom.' };
+  }
+  const { error } = await admin.from('classrooms').delete().eq('id', classroomId);
+  if (error) return { success: false, error: error.message };
+  return { success: true, message: `Classroom "${room.name}" has been deleted.` };
 }
 
 export async function getClassroom(classroomId: string): Promise<Classroom | null> {
-    try {
-        const supabase = await createServerSupabaseClient();
-        const { data, error } = await supabase
-            .from('classrooms')
-            .select('*')
-            .eq('id', classroomId)
-            .single();
-
-        if (error || !data) return null;
-        return rowToClassroom(data);
-    } catch { return null; }
-}
-
-export async function linkGoogleCourseId(classroomId: string, googleCourseId: string): Promise<{ success: boolean; error?: string }> {
-    try {
-        const supabase = await createServerSupabaseClient();
-        const { error } = await supabase
-            .from('classrooms')
-            .update({ google_course_id: googleCourseId })
-            .eq('id', classroomId);
-
-        if (error) return { success: false, error: error.message };
-        return { success: true };
-    } catch {
-        return { success: false, error: 'Server error while linking Google Course ID' };
-    }
+  const caller = await requireRole();
+  if (!isUuid(classroomId) || !(await canAccessClassroom(caller, classroomId))) return null;
+  const admin = await createServiceRoleClient();
+  const [{ data }, { data: members }] = await Promise.all([
+    admin.from('classrooms').select('*').eq('id', classroomId).maybeSingle(),
+    admin.from('classroom_members').select('user_id').eq('classroom_id', classroomId).order('joined_at').limit(10000),
+  ]);
+  if (!data) return null;
+  const room = rowToClassroom(data, (members || []).map((m: any) => m.user_id));
+  if (data.owner_id !== caller.userId && caller.role === 'student') room.inviteCode = undefined;
+  return room;
 }
 
 export async function getClassroomMembers(memberUids: string[]): Promise<{ uid: string; name: string; email: string; role: string }[]> {
-    if (!memberUids || memberUids.length === 0) return [];
-    try {
-        const supabase = await createServerSupabaseClient();
-
-        // Fetch from profiles table (primary source)
-        const { data: profiles } = await supabase
-            .from('profiles')
-            .select('id, full_name, role')
-            .in('id', memberUids);
-
-        // Fetch from teachers table for name fallback
-        const { data: teachers } = await supabase
-            .from('teachers')
-            .select('profile_id, name')
-            .in('profile_id', memberUids);
-
-        // Fetch from students table for name fallback
-        const { data: students } = await supabase
-            .from('students')
-            .select('profile_id, name')
-            .in('profile_id', memberUids);
-
-        return memberUids.map(uid => {
-            const profile = profiles?.find(p => p.id === uid);
-            const teacher = teachers?.find(t => t.profile_id === uid);
-            const student = students?.find(s => s.profile_id === uid);
-
-            const name = profile?.full_name || teacher?.name || student?.name || 'Unknown';
-            const role = profile?.role || (teacher ? 'teacher' : student ? 'student' : 'member');
-
-            return { uid, name, email: '', role };
-        });
-    } catch {
-        return memberUids.map(uid => ({ uid, name: 'Unknown', email: '', role: 'member' }));
-    }
+  await requireRole();
+  const ids = (memberUids || []).filter(isUuid);
+  if (ids.length === 0) return [];
+  const admin = await createServiceRoleClient();
+  const profiles: any[] = [];
+  for (const part of chunk(ids, 300)) {
+    const { data } = await admin.from('profiles').select('id, full_name, role').in('id', part);
+    profiles.push(...(data || []));
+  }
+  const byId = new Map(profiles.map((p) => [p.id, p]));
+  return ids.map((uid) => ({
+    uid,
+    name: byId.get(uid)?.full_name || 'Unknown',
+    email: '',
+    role: byId.get(uid)?.role || 'member',
+  }));
 }

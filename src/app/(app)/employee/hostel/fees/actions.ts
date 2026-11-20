@@ -1,157 +1,87 @@
 'use server';
 
 import { createServiceRoleClient } from '@/lib/supabase';
+import { authorize, requireRole, isUuid } from '@/lib/auth-guard';
+import { fetchAllRows } from '@/lib/db';
 import type { ActionResult } from '@/lib/types';
 
+const HOSTEL_FEE_STAFF = ['emp:hostel_management', 'emp:fee_management'] as const;
+
 export async function getHostelFees(): Promise<any[]> {
-    const supabase = await createServiceRoleClient();
+  await requireRole(...HOSTEL_FEE_STAFF);
+  const admin = await createServiceRoleClient();
 
-    // Get all hosteler students with their allocations
-    const { data: hostelers, error } = await supabase
+  const [hostelers, fees, { data: structures }] = await Promise.all([
+    fetchAllRows(() =>
+      admin
         .from('students')
-        .select(`
-            id,
-            college_id,
-            profiles(full_name),
-            hostel_allocations(
-                id,
-                status,
-                hostel_rooms(room_number, hostels(name))
-            )
-        `)
-        .eq('is_hosteler', true);
+        .select('id, college_id, program, current_year, profiles(full_name), hostel_allocations(status, hostel_rooms(room_number, hostels(name)))')
+        .eq('is_hosteler', true)
+        .eq('status', 'Active')
+        .order('college_id'),
+    ),
+    fetchAllRows(() => admin.from('fees').select('id, student_id, study_year, total_amount, paid_amount, status').eq('fee_type', 'hostel')),
+    admin.from('fee_structures').select('program, study_year, amount').eq('fee_type', 'hostel'),
+  ]);
 
-    if (error) {
-        console.error('[getHostelFees] students error:', error.message);
-        return [];
-    }
-    if (!hostelers) return [];
+  // Fee row for the student's CURRENT year of study.
+  const feeByStudentYear = new Map(fees.map((f: any) => [`${f.student_id}|${f.study_year}`, f]));
+  const configured = (program: string, year: number) => {
+    const rows = (structures || []) as any[];
+    const pick =
+      rows.find((r) => r.program === program && r.study_year === year) ||
+      rows.find((r) => r.program === program && r.study_year == null) ||
+      rows.find((r) => r.program == null && r.study_year === year) ||
+      rows.find((r) => r.program == null && r.study_year == null);
+    return pick ? Number(pick.amount) : 0;
+  };
 
-    // Get current academic term
-    const { data: term } = await supabase
-        .from('academic_terms')
-        .select('id')
-        .eq('is_current', true)
-        .limit(1)
-        .maybeSingle();
-
-    const termId = term?.id || null;
-
-    // Get hostel fee records
-    const studentIds = hostelers.map(h => h.id);
-    const { data: feeRecords } = studentIds.length > 0
-        ? await supabase.from('fees').select('*').eq('fee_type', 'hostel').in('student_id', studentIds)
-        : { data: [] };
-
-    return hostelers.map((student: any) => {
-        const fees = feeRecords?.find((f: any) => f.student_id === student.id);
-        const name = (student.profiles as any)?.full_name || 'Unknown';
-
-        let hostelName = null;
-        let roomNumber = null;
-
-        // Find most recent allocation
-        const latestAlloc = student.hostel_allocations?.[student.hostel_allocations.length - 1];
-        if (latestAlloc) {
-            roomNumber = latestAlloc.hostel_rooms?.room_number || null;
-            hostelName = latestAlloc.hostel_rooms?.hostels?.name || null;
-        }
-
-        const total = fees ? Number(fees.total_amount) : 50000;
-        const paid = fees ? Number(fees.paid_amount) : 0;
-
-        return {
-            id: student.id,
-            collegeId: student.college_id,
-            name,
-            hostelName,
-            roomNumber,
-            total,
-            paid,
-            balance: total - paid,
-            status: fees?.status || 'Pending',
-            academicTermId: termId,
-            feeId: fees?.id || null,
-        };
-    });
+  return hostelers.map((s: any) => {
+    const fee: any = feeByStudentYear.get(`${s.id}|${s.current_year}`);
+    const active = (s.hostel_allocations || []).find((a: any) => a.status === 'Active');
+    const total = fee ? Number(fee.total_amount) : configured(s.program, s.current_year);
+    const paid = fee ? Number(fee.paid_amount) : 0;
+    return {
+      id: s.id,
+      collegeId: s.college_id,
+      name: s.profiles?.full_name || 'Unknown',
+      hostelName: active?.hostel_rooms?.hostels?.name || null,
+      roomNumber: active?.hostel_rooms?.room_number || null,
+      total,
+      paid,
+      balance: total - paid,
+      status: fee?.status || 'Pending',
+      studyYear: s.current_year,
+      academicTermId: null,
+      feeId: fee?.id || null,
+    };
+  });
 }
 
 export async function processHostelPayment(payload: {
-    studentId: string;
-    amount: number;
-    method: string;
-    academicTermId: string | null;
-    feeId: string | null;
+  studentId: string;
+  amount: number;
+  method: string;
+  academicTermId: string | null;
+  feeId: string | null;
 }): Promise<ActionResult> {
-    const supabase = await createServiceRoleClient();
-    let { studentId, amount, method, academicTermId, feeId } = payload;
+  const auth = await authorize(...HOSTEL_FEE_STAFF);
+  if (!auth.ok) return { success: false, error: auth.error };
+  const amount = Number(payload.amount);
+  if (!isUuid(payload.studentId)) return { success: false, error: 'Invalid student.' };
+  if (!Number.isFinite(amount) || amount <= 0) return { success: false, error: 'Amount must be greater than zero.' };
 
-    // Resolve academic term if missing
-    if (!academicTermId) {
-        const { data: term } = await supabase
-            .from('academic_terms')
-            .select('id')
-            .order('start_date', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-        if (!term) return { success: false, error: 'No academic term configured. Please set up an academic term first.' };
-        academicTermId = term.id;
-    }
-
-    try {
-        if (!feeId) {
-            // Create new hostel fee record
-            const totalDue = 50000;
-            const { data: newFee, error: createError } = await supabase
-                .from('fees')
-                .insert({
-                    student_id: studentId,
-                    academic_term_id: academicTermId,
-                    fee_type: 'hostel',
-                    total_amount: totalDue,
-                    paid_amount: amount,
-                    status: amount >= totalDue ? 'Paid' : 'Partial',
-                })
-                .select('id')
-                .single();
-
-            if (createError) throw new Error(createError.message);
-            feeId = newFee.id;
-        } else {
-            const { data: feeData, error: fetchErr } = await supabase
-                .from('fees')
-                .select('paid_amount, total_amount')
-                .eq('id', feeId)
-                .single();
-            if (fetchErr || !feeData) throw new Error('Fee record not found.');
-
-            const newPaid = Number(feeData.paid_amount) + amount;
-            const newStatus = newPaid >= Number(feeData.total_amount) ? 'Paid' : 'Partial';
-
-            const { error: updateErr } = await supabase
-                .from('fees')
-                .update({ paid_amount: newPaid, status: newStatus })
-                .eq('id', feeId);
-            if (updateErr) throw new Error(updateErr.message);
-        }
-
-        // Record fee payment transaction
-        const { error: paymentError } = await supabase.from('fee_payments').insert({
-            fee_id: feeId,
-            amount_paid: amount,
-            payment_method: method,
-            payment_date: new Date().toISOString().split('T')[0],
-            transaction_id: `HOS-TXN-${Date.now()}`,
-        });
-
-        if (paymentError) {
-            console.error('[processHostelPayment] payment log error:', paymentError.message);
-            // Don't fail—the fee was already updated above
-        }
-
-        return { success: true, message: 'Hostel payment recorded successfully.' };
-    } catch (error: any) {
-        console.error('[processHostelPayment] error:', error.message);
-        return { success: false, error: error.message };
-    }
+  const admin = await createServiceRoleClient();
+  const { error } = await admin.rpc('record_fee_payment', {
+    p_student_id: payload.studentId,
+    p_fee_type: 'hostel',
+    p_study_year: null, // the student's current year of study
+    p_amount: amount,
+    p_method: payload.method || 'Cash',
+    p_transaction_id: null,
+    p_payment_date: null,
+    p_recorded_by: auth.caller.userId,
+  });
+  if (error) return { success: false, error: error.message };
+  return { success: true, message: 'Hostel payment recorded successfully.' };
 }

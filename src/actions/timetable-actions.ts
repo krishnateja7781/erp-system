@@ -1,168 +1,151 @@
 'use server';
 
-import { createServiceRoleClient as createServerSupabaseClient } from '@/lib/supabase';
+import { createServiceRoleClient } from '@/lib/supabase';
+import { authorize, requireRole } from '@/lib/auth-guard';
 import type { ActionResult, ScheduleEntry } from '@/lib/types';
-import { PERIOD_SLOTS } from '@/lib/utils';
+import { periodFromStartTime, periodToTimes } from '@/lib/utils';
+import { PROGRAMS, BRANCHES } from '@/lib/academic-codes';
+
+const TIMETABLE_ADMINS = ['emp:exam_marks_management'] as const;
+const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 export interface TimetableFilters {
-    programs: string[];
-    branches: Record<string, string[]>;
-    years: number[];
-    semesters: number[];
-    sections: Record<string, string[]>;
+  programs: string[];
+  branches: Record<string, string[]>;
+  years: number[];
+  semesters: number[];
+  sections: Record<string, string[]>;
 }
 
-
-
 export interface TeacherSchedule {
-    teacher: { id: string; name: string };
-    schedule: ScheduleEntry[];
+  teacher: { id: string; name: string };
+  schedule: ScheduleEntry[];
 }
 
 export interface FullSchedule {
-    studentSchedule: ScheduleEntry[];
-    teacherSchedules: TeacherSchedule[];
-    availableCourses: { courseId: string; courseName: string; teacherId: string; teacherName: string; }[];
+  studentSchedule: ScheduleEntry[];
+  teacherSchedules: TeacherSchedule[];
+  availableCourses: { courseId: string; courseName: string; teacherId: string; teacherName: string }[];
 }
 
+const DEFAULT_FILTERS: TimetableFilters = {
+  programs: [...PROGRAMS],
+  branches: { ...BRANCHES },
+  years: [1, 2, 3, 4, 5],
+  semesters: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+  sections: Object.fromEntries(PROGRAMS.map((p) => [p, ['A', 'B', 'C']])),
+};
+
+/** Default program/branch/section catalogue, extended with anything that already exists in `classes`. */
 export async function getTimetableFilters(): Promise<TimetableFilters> {
-    const supabase = await createServerSupabaseClient();
-    
-    const { data: classes } = await supabase.from('classes').select('*, courses(program, branch)');
-    
-    const filters: TimetableFilters = {
-        programs: ['B.Tech', 'MBA', 'Law', 'MBBS', 'B.Sc', 'B.Com'],
-        branches: {
-            "B.Tech": ["CSE", "ECE", "MECH", "IT", "AI&ML", "DS", "CIVIL", "Other"],
-            "MBA": ["Marketing", "Finance", "HR", "Operations", "General", "Other"]
-        },
-        years: [1, 2, 3, 4],
-        semesters: [1, 2, 3, 4, 5, 6, 7, 8],
-        sections: {
-            "B.Tech": ["A", "B", "C"],
-            "MBA": ["A", "B"]
-        }
-    };
-    
-    return filters;
+  await requireRole();
+  const admin = await createServiceRoleClient();
+  const { data } = await admin.from('classes').select('program, branch, section').limit(5000);
+
+  const filters: TimetableFilters = JSON.parse(JSON.stringify(DEFAULT_FILTERS));
+  for (const c of (data || []) as any[]) {
+    if (!c.program) continue;
+    if (!filters.programs.includes(c.program)) filters.programs.push(c.program);
+    const br = (filters.branches[c.program] ??= []);
+    if (c.branch && !br.includes(c.branch)) br.push(c.branch);
+    const sec = (filters.sections[c.program] ??= []);
+    if (c.section && !sec.includes(c.section)) sec.push(c.section);
+  }
+  return filters;
 }
 
-export async function getScheduleForClass(selected: any): Promise<FullSchedule> {
-    const supabase = await createServerSupabaseClient();
-    const { program, branch, semester, section } = selected;
-    
-    const { data: classList } = await supabase.from('classes')
-        .select('*, courses(*), teachers(profile_id, profiles(full_name))')
-        .eq('semester', semester)
-        .eq('section', section);
-        
-    // In our normalized schema, we map periods into the 'start_time' column as '0P:00:00'
-    const studentSchedule: ScheduleEntry[] = [];
-    const teacherSchedulesMap = new Map<string, TeacherSchedule>();
-    const availableCourses: any[] = [];
-    
-    if (classList && classList.length > 0) {
-        for (const c of classList) {
-            // Only consider classes that match the program/branch for the mapped course
-            if (c.courses.program !== program || c.courses.branch !== branch) continue;
-            
-                    const teacherId = c.teachers?.profile_id || 'unassigned';
-            const teacherName = c.teachers?.profiles?.full_name || 'Unassigned';
-            
-            availableCourses.push({
-                courseId: c.courses.code,
-                courseName: c.courses.name,
-                teacherId: teacherId,
-                teacherName: teacherName
-            });
-            
-            // Always ensure the teacher appears in the Teacher View, even if they have an empty schedule
-            if (!teacherSchedulesMap.has(teacherId)) {
-                teacherSchedulesMap.set(teacherId, { teacher: { id: teacherId, name: teacherName }, schedule: [] });
-            }
-            
-            const { data: timetables } = await supabase.from('timetables').select('*').eq('class_id', c.id);
-            if (timetables) {
-                timetables.forEach((t: any) => {
-                    let period = 1;
-                    if (t.start_time) {
-                        period = parseInt(t.start_time.split(':')[0], 10);
-                    }
-                    
-                    const entry: ScheduleEntry = {
-                        id: t.id,
-                        classId: c.id,
-                        courseId: c.courses.code,
-                        teacherId: teacherId,
-                        day: t.day_of_week,
-                        period,
-                        courseCode: c.courses.code,
-                        courseName: c.courses.name,
-                        teacherName: teacherName,
-                        class: `${program} ${branch} ${section}`
-                    };
-                    
-                    studentSchedule.push(entry);
-                    
-                    teacherSchedulesMap.get(teacherId)!.schedule.push(entry);
-                });
-            }
-        }
-    }
+export async function getScheduleForClass(selected: { program: string; branch: string; semester: number | string; section: string }): Promise<FullSchedule> {
+  await requireRole();
+  const { program, branch, semester, section } = selected || ({} as any);
+  const empty: FullSchedule = { studentSchedule: [], teacherSchedules: [], availableCourses: [] };
+  if (!program || !branch || !semester || !section) return empty;
 
-    return {
-        studentSchedule,
-        teacherSchedules: Array.from(teacherSchedulesMap.values()),
-        availableCourses
-    };
+  const admin = await createServiceRoleClient();
+  const { data: classList } = await admin
+    .from('classes')
+    .select('id, courses(code, name), teachers(profile_id, profiles(full_name)), timetables(id, day_of_week, start_time, room)')
+    .eq('program', program)
+    .eq('branch', branch)
+    .eq('semester', Number(semester))
+    .eq('section', section);
+
+  const studentSchedule: ScheduleEntry[] = [];
+  const teacherMap = new Map<string, TeacherSchedule>();
+  const availableCourses: FullSchedule['availableCourses'] = [];
+
+  for (const c of (classList || []) as any[]) {
+    const teacherId = c.teachers?.profile_id || 'unassigned';
+    const teacherName = c.teachers?.profiles?.full_name || 'Unassigned';
+    availableCourses.push({ courseId: c.courses?.code, courseName: c.courses?.name, teacherId, teacherName });
+    if (!teacherMap.has(teacherId)) teacherMap.set(teacherId, { teacher: { id: teacherId, name: teacherName }, schedule: [] });
+
+    for (const t of c.timetables || []) {
+      const entry: ScheduleEntry = {
+        id: t.id,
+        classId: c.id,
+        courseId: c.courses?.code,
+        teacherId,
+        day: t.day_of_week,
+        period: periodFromStartTime(t.start_time),
+        room: t.room || undefined,
+        courseCode: c.courses?.code,
+        courseName: c.courses?.name,
+        teacherName,
+        class: `${program} ${branch} ${section}`,
+      };
+      studentSchedule.push(entry);
+      teacherMap.get(teacherId)!.schedule.push(entry);
+    }
+  }
+  return { studentSchedule, teacherSchedules: Array.from(teacherMap.values()), availableCourses };
 }
 
-export async function saveTimetableBulk(payload: any): Promise<ActionResult> {
-    const supabase = await createServerSupabaseClient();
-    const { program, branch, semester, section, slots } = payload;
-    
-    // First retrieve the relevant class records
-    const { data: classList, error: pullErr } = await supabase.from('classes')
-        .select('*, courses(*)')
-        .eq('semester', semester)
-        .eq('section', section);
-        
-    if (pullErr) return { success: false, error: 'Could not resolve classes.' };
-    
-    const validClassIds = (classList || [])
-        .filter(c => c.courses && c.courses.program === program && c.courses.branch === branch)
-        .map(c => c.id);
-        
-    if (validClassIds.length > 0) {
-        // Clear old timetable entries for these classes
-        await supabase.from('timetables').delete().in('class_id', validClassIds);
-    }
-    
-    for (const slot of slots) {
-        // BUG FIX #11: was generating '0{period}:00:00' which is wrong (1 AM for period 1, invalid for period 10+)
-        // Now use PERIOD_SLOTS to map period number to the correct real clock time
-        const targetClass = classList?.find(c => c.courses?.code === slot.courseId);
-        if (targetClass) {
-            const periodSlot = PERIOD_SLOTS[slot.period];
-            const startHour = periodSlot ? periodSlot.start[0] : 9 + (slot.period - 1);
-            const startMin = periodSlot ? periodSlot.start[1] : 0;
-            const endHour = periodSlot ? periodSlot.end[0] : startHour + 1;
-            const endMin = periodSlot ? periodSlot.end[1] : 0;
-            const startStr = `${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}:00`;
-            const endStr = `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}:00`;
+/**
+ * Replaces a section's weekly timetable in ONE transaction (`replace_section_timetable`):
+ * either the whole new grid is stored or nothing changes. The function also rejects
+ * a teacher being double-booked in another section at the same slot.
+ */
+export async function saveTimetableBulk(payload: {
+  program: string;
+  branch: string;
+  semester: number | string;
+  section: string;
+  slots: { courseId?: string; day: string; period: number; room?: string }[];
+}): Promise<ActionResult> {
+  const auth = await authorize(...TIMETABLE_ADMINS);
+  if (!auth.ok) return { success: false, error: auth.error };
+  const { program, branch, semester, section, slots } = payload || ({} as any);
+  if (!program || !branch || !semester || !section || !Array.isArray(slots)) return { success: false, error: 'Incomplete timetable payload.' };
 
-            const { error: insertErr } = await supabase.from('timetables').insert({
-                class_id: targetClass.id,
-                day_of_week: slot.day,
-                start_time: startStr,
-                end_time: endStr
-            });
-            if (insertErr) {
-                return { success: false, error: 'Database Error: ' + insertErr.message };
-            }
-        }
-    }
-    
-    return { success: true, message: 'Timetable saved.' };
+  const admin = await createServiceRoleClient();
+  const { data: classList, error: clsErr } = await admin
+    .from('classes')
+    .select('id, courses(code)')
+    .eq('program', program)
+    .eq('branch', branch)
+    .eq('semester', Number(semester))
+    .eq('section', section);
+  if (clsErr) return { success: false, error: 'Could not resolve classes.' };
+
+  const classByCode = new Map(((classList || []) as any[]).map((c) => [c.courses?.code, c.id]));
+  const rows: any[] = [];
+  const seen = new Set<string>();
+  for (const slot of slots) {
+    const classId = slot.courseId ? classByCode.get(slot.courseId) : undefined;
+    if (!classId) continue;
+    if (!DAYS.includes(slot.day)) return { success: false, error: `Invalid day "${slot.day}".` };
+    const key = `${slot.day}|${slot.period}`;
+    if (seen.has(key)) return { success: false, error: `Two courses are placed in ${slot.day} period ${slot.period}.` };
+    seen.add(key);
+    const { start, end } = periodToTimes(Number(slot.period));
+    rows.push({ class_id: classId, day_of_week: slot.day, start_time: start, end_time: end, room: slot.room || null });
+  }
+
+  const { data, error } = await admin.rpc('replace_section_timetable', {
+    p_class_ids: Array.from(classByCode.values()),
+    p_rows: rows,
+  });
+  if (error) return { success: false, error: error.message };
+  if (data && data.success === false) return { success: false, error: data.error };
+  return { success: true, message: 'Timetable saved.' };
 }
-

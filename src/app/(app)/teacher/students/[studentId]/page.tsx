@@ -24,23 +24,8 @@ export default function TeacherStudentProfilePage() {
     React.useEffect(() => {
         const loadData = async () => {
             const studentId = params.studentId as string;
-            const storedUserString = localStorage.getItem('loggedInUser');
-
-            if (!storedUserString) {
-                setError("Could not identify teacher. Please log in again.");
-                setIsLoading(false);
-                return;
-            }
-
-            const teacher = JSON.parse(storedUserString);
-            if (!teacher?.uid) {
-                setError("Teacher authentication details are missing.");
-                setIsLoading(false);
-                return;
-            }
-
             try {
-                const result = await getStudentProfileForTeacher(studentId, teacher.uid);
+                const result = await getStudentProfileForTeacher(studentId);
                 if (result.data) {
                     setStudentData(result.data);
                 } else {

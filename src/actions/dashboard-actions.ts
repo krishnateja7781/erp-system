@@ -1,569 +1,387 @@
-
 'use server';
 
-import { readCollection, findOneWhere, findWhere } from '@/lib/db';
-import { createServiceRoleClient as createServerSupabaseClient } from '@/lib/supabase';
-import type { Teacher, Student, FullStudentData } from '@/lib/types';
-import { PERIOD_SLOTS } from '@/lib/utils';
+import { createServiceRoleClient } from '@/lib/supabase';
+import { requireRole, requireStudentAccess, pinToSelf, isUuid } from '@/lib/auth-guard';
+import type { FullStudentData } from '@/lib/types';
+import { PERIOD_SLOTS, todayDayName, getInitials } from '@/lib/utils';
+import { calculateCGPA } from '@/lib/grading';
+import { todayISODate } from '@/lib/db';
 import { getStudentSchedule } from './student-actions';
-import { getTeacherSchedule as getFullTeacherSchedule } from './teacher-actions';
+import { getTeacherSchedule } from './teacher-actions';
 
-const calculateCGPA = (allMarksData: { grade: string | null; credits: number | null }[]): number | null => {
-    let totalCreditPoints = 0; let totalCreditsAttempted = 0;
-    const getGradePoint = (grade: string | null): number | null => {
-        if (!grade) return null;
-        switch (grade.toUpperCase()) {
-            case 'O': return 10; case 'A+': return 9; case 'A': return 8; case 'B+': return 7;
-            case 'B': return 6; case 'C+': return 5; case 'C': return 4; case 'P': return 3;
-            case 'FAIL': case 'F': return 0; default: return null;
-        }
-    };
-    allMarksData.forEach((mark) => {
-        if (mark.credits && typeof mark.credits === 'number' && mark.credits > 0) {
-            const gradePoint = getGradePoint(mark.grade);
-            if (gradePoint !== null) { totalCreditPoints += gradePoint * mark.credits; totalCreditsAttempted += mark.credits; }
-        }
-    });
-    if (totalCreditsAttempted === 0) return null;
-    return parseFloat((totalCreditPoints / totalCreditsAttempted).toFixed(2));
-};
-
-export async function getStudentProfileDetails(studentDocId: string): Promise<FullStudentData | null> {
-    if (!studentDocId) return null;
-    try {
-        const supabase = await createServerSupabaseClient();
-        
-        let { data: studentData, error: studentError } = await supabase
-            .from('students')
-            .select('*, profiles(full_name, email, phone, profile_picture_url)')
-            .eq('id', studentDocId)
-            .maybeSingle();
-            
-        if (!studentData) {
-            // Fallback: If caller passed the auth profile_id instead of students.id
-            const fallback = await supabase
-                .from('students')
-                .select('*, profiles(full_name, email, phone, profile_picture_url)')
-                .eq('profile_id', studentDocId)
-                .maybeSingle();
-            studentData = fallback.data;
-            studentError = fallback.error;
-            if (studentData) {
-                studentDocId = studentData.id; // Correct downstream ID for attendance, marks, etc.
-            }
-        }
-            
-        if (studentError || !studentData) return null;
-
-        // Map it back to the expected Student interface format
-        const profileInfo = {
-            ...studentData,
-            name: studentData.profiles?.full_name || 'Unknown',
-            email: studentData.profiles?.email || '',
-            phone: studentData.profiles?.phone || '',
-            avatarUrl: studentData.profiles?.profile_picture_url || '',
-            collegeId: studentData.college_id,
-            year: studentData.current_year,
-            semester: studentData.current_semester,
-            isHosteler: studentData.is_hosteler,
-            type: studentData.student_type || (studentData.is_hosteler ? 'Hosteler' : 'Day Scholar'),
-        };
-
-        // 2. Attendance
-        const { data: attendanceRecs } = await supabase
-            .from('attendance')
-            .select('status')
-            .eq('student_id', studentDocId);
-            
-        const attendance: any = { overallPercentage: 100, recentAbsences: null };
-        if (attendanceRecs && attendanceRecs.length > 0) {
-            const totalClasses = attendanceRecs.length;
-            const presentClasses = attendanceRecs.filter((a: any) => a.status === 'Present').length;
-            attendance.overallPercentage = totalClasses > 0 ? Math.round((presentClasses / totalClasses) * 100) : 100;
-        }
-
-        // 3. Marks & CGPA
-        const { data: marksRecs } = await supabase
-            .from('marks')
-            .select('grade, classes(courses(credits, title))')
-            .eq('student_id', studentDocId);
-
-        let allMarksData: any[] = [];
-        if (marksRecs && marksRecs.length > 0) {
-            allMarksData = marksRecs.map((m: any) => ({
-                grade: m.grade || null,
-                credits: m.classes?.courses?.credits || null,
-                courseTitle: m.classes?.courses?.title || 'Unknown Course'
-            }));
-        }
-
-        const marks: any = { 
-            cgpa: calculateCGPA(allMarksData), 
-            recentGrades: allMarksData.slice(-5).filter((m: any) => m.grade).map((m: any) => ({ course: m.courseTitle, grade: m.grade! })) 
-        };
-
-        // 4. Fees
-        const { data: feeRecs } = await supabase
-            .from('fees')
-            .select('balance')
-            .eq('student_id', studentDocId);
-            
-        const totalBalance = feeRecs?.reduce((sum, f) => sum + (f.balance || 0), 0) || 0;
-        const fees = { balance: totalBalance, status: totalBalance <= 0 ? 'Paid' : 'Pending' };
-
-        // 5. Hostel
-        const { data: hostelData } = await supabase
-            .from('hostel_allocations')
-            .select('hostel_rooms(room_number, hostels(name))')
-            .eq('student_id', studentDocId)
-            .eq('status', 'Active')
-            .single();
-            
-        const hostelRoomsData: any = hostelData?.hostel_rooms;
-        const hostelInfo = hostelRoomsData ? { 
-            hostelName: hostelRoomsData.hostels?.name || (Array.isArray(hostelRoomsData.hostels) ? hostelRoomsData.hostels[0]?.name : 'Hostel'), 
-            roomNumber: hostelRoomsData.room_number || null 
-        } : null;
-
-        // 6. Courses Enrolled
-        const { data: enrolledClasses } = await supabase
-            .from('enrollments')
-            .select('classes(courses(title))')
-            .eq('student_id', studentDocId);
-            
-        const coursesEnrolled = enrolledClasses?.map((c: any) => c.classes?.courses?.title || 'Unknown Course') || [];
-
-        return { profile: profileInfo as any, attendance, marks, fees, hostelInfo, coursesEnrolled };
-    } catch (error) {
-        console.error('Error in getStudentProfileDetails:', error);
-        return null;
-    }
-}
+// ── Types ──────────────────────────────────────────────────────────────────────
 
 export interface PendingAttendanceItem {
-    period: number;
-    periodTitle: string;
-    courseName: string;
-    className: string;
-    classId: string;
+  period: number;
+  periodTitle: string;
+  courseName: string;
+  className: string;
+  classId: string;
 }
 
 export interface TeacherDashboardData {
-    name: string;
-    coursesTeaching: { id: string; name: string; studentCount: number }[];
-    upcomingClasses: { time: string; course: string; class: string; location: string }[];
-    pendingMarksCount: number;
-    hasPublishedExams: boolean;
-    pendingAttendance: PendingAttendanceItem[];
+  name: string;
+  coursesTeaching: { id: string; name: string; studentCount: number }[];
+  upcomingClasses: { time: string; course: string; class: string; location: string }[];
+  pendingMarksCount: number;
+  hasPublishedExams: boolean;
+  pendingAttendance: PendingAttendanceItem[];
 }
 
 export interface StudentDashboardData {
-    overallAttendance: number | null;
-    coursesEnrolledCount: number | null;
-    upcomingExam: { sessionName: string; courseName: string; date: string } | null;
-    schedule: any[];
+  overallAttendance: number | null;
+  coursesEnrolledCount: number | null;
+  upcomingExam: { sessionName: string; courseName: string; date: string } | null;
+  schedule: any[];
 }
 
 export interface LoginEvent {
-    id: string;
-    userName: string;
-    userRole: string;
-    timestamp: string;
+  id: string;
+  userName: string;
+  userRole: string;
+  timestamp: string;
 }
 
 export interface AdminDashboardData {
-    totalStudents: number;
-    totalTeachers: number;
-    totalPrograms: number;
-    pendingApprovals: number;
-    collectionRate: number;
-    attendanceTrend: { month: string; attendance: number }[];
-    recentLogins: LoginEvent[];
-    studentDistribution: { branch: string; count: number }[];
-}
-
-export async function getAdminDashboardStats(): Promise<AdminDashboardData> {
-    try {
-        const supabase = await createServerSupabaseClient();
-        
-        const { count: totalStudents } = await supabase.from('students').select('*', { count: 'exact', head: true });
-        const { count: totalTeachers } = await supabase.from('teachers').select('*', { count: 'exact', head: true });
-        
-        const { data: courses } = await supabase.from('courses').select('program');
-        const uniquePrograms = new Set(courses?.map(c => c.program).filter(Boolean));
-        const totalPrograms = uniquePrograms.size;
-
-        const { data: fees } = await supabase.from('fees').select('total_amount, paid_amount');
-        let collectionRate = 0;
-        if (fees && fees.length > 0) {
-            const sumPaid = fees.reduce((sum, f) => sum + (f.paid_amount || 0), 0);
-            const sumTotal = fees.reduce((sum, f) => sum + (f.total_amount || 0), 0);
-            collectionRate = sumTotal > 0 ? Math.round((sumPaid / sumTotal) * 100) : 0;
-        }
-           
-        // Distribution
-        const { data: students } = await supabase.from('students').select('branch');
-        const branchDist: Record<string, number> = {};
-        students?.forEach(s => {
-            if (s.branch) branchDist[s.branch] = (branchDist[s.branch] || 0) + 1;
-        });
-        const studentDistribution = Object.entries(branchDist)
-            .map(([branch, count]) => ({ branch, count }))
-            .sort((a, b) => b.count - a.count);
-
-        // Overall attendance avg
-        const { data: attendanceData } = await supabase.from('attendance').select('status');
-        const totalAtt = attendanceData?.length || 0;
-        const presentAtt = attendanceData?.filter(a => a.status === 'present').length || 0;
-        const overallAttPct = totalAtt > 0 ? Math.round((presentAtt / totalAtt) * 100) : 0;
-
-        // Build real 12-month attendance trend
-        const { data: allAttendance } = await supabase.from('attendance').select('date, status');
-        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        const monthlyMap: Record<string, { total: number; present: number }> = {};
-        (allAttendance || []).forEach((a: any) => {
-            if (!a.date) return;
-            try {
-                const d = new Date(a.date);
-                const key = `${d.getFullYear()}-${monthNames[d.getMonth()]}`;
-                if (!monthlyMap[key]) monthlyMap[key] = { total: 0, present: 0 };
-                monthlyMap[key].total++;
-                if (a.status === 'Present') monthlyMap[key].present++;
-            } catch { /* skip invalid dates */ }
-        });
-        const attendanceTrend = Object.entries(monthlyMap)
-            .sort(([a], [b]) => a.localeCompare(b))
-            .slice(-6) // last 6 months
-            .map(([key, stats]) => ({
-                month: key.split('-')[1],
-                attendance: stats.total > 0 ? Math.round((stats.present / stats.total) * 100) : 0
-            }));
-        // Fallback if no data
-        const finalAttendanceTrend = attendanceTrend.length > 0 ? attendanceTrend : [
-            { month: 'Jan', attendance: 0 },
-            { month: 'Feb', attendance: 0 }
-        ];
-
-        // Recent profiles — shown as "recently registered" not "recent logins"
-        const { data: recentProfiles } = await supabase.from('profiles').select('*').order('created_at', { ascending: false }).limit(5);
-        const recentLogins = recentProfiles?.map(p => ({
-            id: p.id,
-            userName: p.full_name || 'System Admin',
-            userRole: p.role,
-            timestamp: p.created_at || new Date().toISOString()
-        })) || [];
-
-        return { 
-           totalStudents: totalStudents || 0, 
-           totalTeachers: totalTeachers || 0, 
-           totalPrograms, 
-           pendingApprovals: 0, 
-           collectionRate, 
-           attendanceTrend: finalAttendanceTrend, 
-           recentLogins, 
-           studentDistribution 
-        };
-    } catch (error) {
-        console.error('Error in getAdminDashboardStats:', error);
-        throw new Error('Failed to fetch admin dashboard stats.');
-    }
-}
-
-export async function getTeacherDashboardData(teacherUid: string, extraIds?: { staffDocId?: string | null; email?: string | null }): Promise<TeacherDashboardData> {
-    const profile = await getTeacherProfileDetails(teacherUid, extraIds);
-    if (!profile) throw new Error("Teacher profile not found. Your detailed teacher record may not exist in the database. Please contact an administrator to verify your profile has been created.");
-
-    const coursesAssigned = profile.coursesAssigned.map((c: any) => ({
-        id: c.id,
-        name: c.name || c.courseName,
-        studentCount: c.studentCount || 0
-    }));
-
-    const upcomingClasses = profile.schedule ? profile.schedule.slice(0, 3).map((s: any) => {
-        const slot = PERIOD_SLOTS[s.period];
-        return {
-            time: slot ? slot.title : `Period ${s.period}`,
-            course: s.courseName,
-            class: s.class,
-            location: 'Room'
-        };
-    }) : [];
-
-    // ── Exam-aware pending marks ──
-    // Only show pending marks count when there are published (Scheduled) exams
-    // for the teacher's classes
-    const teacherClassIds = profile.coursesAssigned.map((c: any) => c.id);
-    const teacherPrograms = profile.coursesAssigned.map((c: any) => {
-        const parts = (c.class || '').split('-');
-        return { program: parts[0]?.trim(), branch: parts[1]?.split('(')[0]?.trim() };
-    });
-
-    let hasPublishedExams = false;
-    let pendingMarksCount = 0;
-    try {
-        const allExams = await readCollection<any>('exams');
-        const relevantExams = allExams.filter((exam: any) => {
-            if (exam.status === 'Cancelled') return false;
-            return teacherPrograms.some((tp: any) =>
-                tp.program && exam.program === tp.program && exam.branch === tp.branch
-            );
-        });
-        hasPublishedExams = relevantExams.length > 0;
-        if (hasPublishedExams) {
-            pendingMarksCount = profile.studentsCount || 0;
-        }
-    } catch (e) {
-        console.error('Error checking exams for pending marks:', e);
-    }
-
-    // ── Pending attendance: check today's schedule for periods already done ──
-    const pendingAttendance: PendingAttendanceItem[] = [];
-    try {
-        const now = new Date();
-        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-        const todayDay = days[now.getDay()];
-        const todayDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-        const currentMinutes = now.getHours() * 60 + now.getMinutes();
-
-        // Get today's schedule for this teacher
-        const todaySchedule = (profile.schedule || []).filter((s: any) => s.day === todayDay);
-
-        for (const entry of todaySchedule) {
-            const slot = PERIOD_SLOTS[entry.period];
-            if (!slot) continue;
-
-            // Only check periods whose end time has passed
-            const endMinutes = slot.end[0] * 60 + slot.end[1];
-            if (currentMinutes < endMinutes) continue;
-
-            // Check if attendance was already recorded for this class/date/period
-            const classId = entry.classId;
-            if (!classId) continue;
-
-            const supabaseCheck = await createServerSupabaseClient();
-            const { data: attendanceRows } = await supabaseCheck
-                .from('attendance')
-                .select('id')
-                .eq('class_id', classId)
-                .eq('date', todayDate)
-                .eq('period', entry.period)
-                .limit(1);
-            const attendanceExists = attendanceRows && attendanceRows.length > 0;
-
-            if (!attendanceExists) {
-                pendingAttendance.push({
-                    period: entry.period,
-                    periodTitle: slot.title,
-                    courseName: entry.courseName || entry.courseCode,
-                    className: entry.class || '',
-                    classId: classId,
-                });
-            }
-        }
-    } catch (e) {
-        console.error('Error checking pending attendance:', e);
-    }
-
-    return {
-        name: profile.profile.name,
-        coursesTeaching: coursesAssigned,
-        upcomingClasses,
-        pendingMarksCount,
-        hasPublishedExams,
-        pendingAttendance,
-    };
-}
-
-export async function getTeacherProfileDetails(teacherUid: string, extraIds?: { staffDocId?: string | null; email?: string | null }): Promise<any | null> {
-    if (!teacherUid) return null;
-    try {
-        const supabase = await createServerSupabaseClient();
-
-        // Primary lookup: teacher whose profile_id matches the logged-in user's auth UID
-        let { data: teacherData, error } = await supabase
-            .from('teachers')
-            .select('*, profiles(full_name, email, phone, profile_picture_url)')
-            .eq('profile_id', teacherUid)
-            .maybeSingle();
-
-        // Fallback: look up by the teachers.id primary key (used by some legacy callers)
-        if (!teacherData && extraIds?.staffDocId) {
-            const { data: byId } = await supabase
-                .from('teachers')
-                .select('*, profiles(full_name, email, phone, profile_picture_url)')
-                .eq('id', extraIds.staffDocId)
-                .maybeSingle();
-            if (byId) teacherData = byId;
-        }
-
-        if (!teacherData) return null;
-
-        const resolvedTeacherId = teacherData.id; // Supabase PK
-        const schedule = await getFullTeacherSchedule(resolvedTeacherId);
-
-        // Fetch classes assigned to this teacher
-        const { data: teacherClasses } = await supabase
-            .from('classes')
-            .select('id, name, courses(id, name, code)')
-            .eq('teacher_id', resolvedTeacherId);
-
-        const classRows = teacherClasses || [];
-
-        // Count unique students across all classes
-        const { count: studentsCount } = await supabase
-            .from('students')
-            .select('id', { count: 'exact', head: true })
-            .in('class_id', classRows.map((c: any) => c.id));
-
-        const coursesAssigned = classRows.map((c: any) => {
-            const course = Array.isArray(c.courses) ? c.courses[0] : c.courses;
-            return {
-                id: c.id,
-                code: course?.code || '',
-                name: course?.name || c.name,
-                class: c.name,
-                studentCount: 0 // populated lazily
-            };
-        });
-
-        return {
-            profile: {
-                ...teacherData,
-                // Normalize name so callers can use profile.profile.name
-                name: (teacherData.profiles as any)?.full_name || teacherData.full_name || 'Teacher',
-                email: (teacherData.profiles as any)?.email || teacherData.email || '',
-                phone: (teacherData.profiles as any)?.phone || teacherData.phone || '',
-                avatarUrl: (teacherData.profiles as any)?.profile_picture_url || teacherData.avatar_url || '',
-                staffId: teacherData.staff_id,
-                joinDate: teacherData.join_date || teacherData.created_at?.split('T')[0],
-                officeLocation: teacherData.office_location,
-            },
-            coursesAssigned,
-            studentsCount: studentsCount || 0,
-            classAttendanceRate: null,
-            schedule
-        };
-    } catch (error) {
-        console.error('Error in getTeacherProfileDetails:', error);
-        return null;
-    }
-}
-
-export async function getStudentDashboardData(studentDocId: string): Promise<StudentDashboardData | null> {
-    if (!studentDocId) return null;
-    try {
-        const [studentProfile, schedule] = await Promise.all([
-            getStudentProfileDetails(studentDocId),
-            getStudentSchedule(studentDocId),
-        ]);
-        if (!studentProfile) return null;
-
-        const examRecs = (await findWhere<any>('exams', (e) => e.program === (studentProfile.profile as any).program && e.branch === (studentProfile.profile as any).branch && e.status === 'Scheduled'))
-            .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime())
-            .slice(0, 5);
-
-        const userId = (studentProfile.profile as any).user_uid || studentDocId;
-        const notifications = (await findWhere<any>('notifications', (n) => n.recipientUid === userId))
-            .sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-            .slice(0, 10);
-
-        return {
-            overallAttendance: studentProfile.attendance?.overallPercentage || null,
-            coursesEnrolledCount: studentProfile.coursesEnrolled?.length || 0,
-            upcomingExam: examRecs.length > 0 ? { sessionName: examRecs[0].examSessionName, courseName: examRecs[0].courseName || 'Course', date: examRecs[0].date } : null,
-            schedule,
-        };
-    } catch (error) {
-        console.error('Error in getStudentDashboardData:', error);
-        return null;
-    }
+  totalStudents: number;
+  totalTeachers: number;
+  totalPrograms: number;
+  pendingApprovals: number;
+  collectionRate: number;
+  attendanceTrend: { month: string; attendance: number }[];
+  recentLogins: LoginEvent[];
+  studentDistribution: { branch: string; count: number }[];
 }
 
 export interface EmployeeDashboardData {
-    employeeType: string;
-    // Fee Management
-    totalFees?: number;
-    collectedFees?: number;
-    pendingFees?: number;
-    collectionRate?: number;
-    // Hostel Management
-    totalRooms?: number;
-    occupiedRooms?: number;
-    availableRooms?: number;
-    totalHostelStudents?: number;
-    // Exam Management
-    totalExams?: number;
-    scheduledExams?: number;
-    totalClasses?: number;
-    totalCourses?: number;
-    marksEntered?: number;
-    // Library Management
-    totalBooks?: number;
-    availableBooks?: number;
-    issuedBooks?: number;
-    // User management
-    adminStats?: AdminDashboardData;
+  employeeType: string;
+  totalFees?: number;
+  collectedFees?: number;
+  pendingFees?: number;
+  collectionRate?: number;
+  totalRooms?: number;
+  occupiedRooms?: number;
+  availableRooms?: number;
+  totalHostelStudents?: number;
+  totalExams?: number;
+  scheduledExams?: number;
+  totalClasses?: number;
+  totalCourses?: number;
+  marksEntered?: number;
+  totalBooks?: number;
+  availableBooks?: number;
+  issuedBooks?: number;
+  adminStats?: AdminDashboardData;
 }
 
-export async function getEmployeeDashboardStats(profileId: string): Promise<EmployeeDashboardData> {
-    const supabase = await createServerSupabaseClient();
-    const { data: employee } = await supabase.from('employees').select('employee_type').eq('profile_id', profileId).single();
-    if (!employee) throw new Error("Employee not found");
+// ── Student profile (used by admin, teacher and student views) ─────────────────
 
-    const employeeType = employee.employee_type;
-    const result: EmployeeDashboardData = { employeeType };
+export async function getStudentProfileDetails(studentDocId: string): Promise<FullStudentData | null> {
+  if (!studentDocId) return null;
+  try {
+    const { studentId } = await requireStudentAccess(studentDocId);
+    const admin = await createServiceRoleClient();
 
-    if (employeeType === 'student_staff_management') {
-         result.adminStats = await getAdminDashboardStats();
-    } else if (employeeType === 'fee_management') {
-         const { data: fees } = await supabase.from('fees').select('total_amount, paid_amount');
-         let collected = 0; let total = 0;
-         fees?.forEach(f => {
-            collected += (f.paid_amount || 0);
-            total += (f.total_amount || 0);
-         });
-         result.totalFees = total;
-         result.collectedFees = collected;
-         result.pendingFees = total - collected;
-         result.collectionRate = total > 0 ? Math.round((collected / total) * 100) : 0;
-    } else if (employeeType === 'hostel_management') {
-         const { data: rooms } = await supabase.from('hostel_rooms').select('capacity, hostel_allocations(id)');
-         let totalBeds = 0; let totalRoomsCount = rooms?.length || 0;
-         rooms?.forEach(r => {
-             totalBeds += r.capacity || 0;
-         });
-         // BUG FIX #13: was querying non-existent students.hostel_roomId. Count from hostel_allocations instead.
-         const { count: allocatedStudents } = await supabase.from('hostel_allocations').select('*', { count: 'exact', head: true });
-         const occupiedBeds = allocatedStudents || 0;
-         result.totalRooms = totalRoomsCount;
-         result.occupiedRooms = occupiedBeds;
-         result.availableRooms = Math.max(0, totalBeds - occupiedBeds);
-         result.totalHostelStudents = occupiedBeds;
-    } else if (employeeType === 'exam_marks_management') {
-         // BUG FIX #14: align table names — 'exams' for schedule count, 'exam_marks' for marks entered
-         const [examsRes, classesRes, coursesRes, marksRes] = await Promise.all([
-             supabase.from('exams').select('id, status', { count: 'exact' }),
-             supabase.from('classes').select('*', { count: 'exact', head: true }),
-             supabase.from('courses').select('*', { count: 'exact', head: true }),
-             supabase.from('exam_marks').select('*', { count: 'exact', head: true }),
-         ]);
-         result.totalExams = (examsRes.data?.length) || 0;
-         result.scheduledExams = examsRes.data?.filter((e: any) => e.status === 'Scheduled').length || 0;
-         result.totalClasses = classesRes.count || 0;
-         result.totalCourses = coursesRes.count || 0;
-         result.marksEntered = marksRes.count || 0;
-    } else if (employeeType === 'library_management') {
-         const { data: books } = await supabase.from('books').select('total_copies, available_copies');
-         let total = 0; let available = 0;
-         books?.forEach(b => {
-             total += b.total_copies || 0;
-             available += b.available_copies || 0;
-         });
-         result.totalBooks = total;
-         result.availableBooks = available;
-         result.issuedBooks = total - available;
+    const [{ data: s }, { data: att }, { data: marks }, { data: fees }, { data: hostel }] = await Promise.all([
+      admin.from('students').select('*, profiles(full_name, email, phone, profile_picture_url)').eq('id', studentId).single(),
+      admin.rpc('get_student_attendance_totals', { p_student_id: studentId }),
+      admin.from('marks').select('grade, classes(courses(name, credits))').eq('student_id', studentId),
+      admin.from('fees').select('balance').eq('student_id', studentId),
+      admin
+        .from('hostel_allocations')
+        .select('hostel_rooms(room_number, hostels(name))')
+        .eq('student_id', studentId)
+        .eq('status', 'Active')
+        .maybeSingle(),
+    ]);
+    if (!s) return null;
+
+    const p = (s as any).profiles || {};
+    const profile = {
+      ...s,
+      name: p.full_name || 'Unknown',
+      email: p.email || '',
+      phone: p.phone || '',
+      avatarUrl: p.profile_picture_url || '',
+      collegeId: s.college_id,
+      year: s.current_year,
+      semester: s.current_semester,
+      isHosteler: s.is_hosteler,
+      type: s.is_hosteler ? 'Hosteler' : 'Day Scholar',
+      status: s.status || (s.is_graduated ? 'Graduated' : 'Active'),
+      batch: s.admitted_year ? String(s.admitted_year) : undefined,
+      initials: getInitials(p.full_name),
+      bloodGroup: s.blood_group,
+      emergencyContact: { name: s.parent_name || '', phone: s.parent_phone || '', address: s.address || '' },
+    };
+
+    const totals = Array.isArray(att) ? att[0] : att;
+    const total = Number(totals?.total_classes) || 0;
+    const present = Number(totals?.present_classes) || 0;
+    const attendance = { overallPercentage: total > 0 ? Math.round((present / total) * 100) : null, totalClasses: total, presentClasses: present, recentAbsences: null };
+
+    const markRows = ((marks || []) as any[]).map((m) => ({
+      grade: m.grade || null,
+      credits: m.classes?.courses?.credits ?? null,
+      courseTitle: m.classes?.courses?.name || 'Unknown Course',
+    }));
+    const marksSummary = {
+      cgpa: calculateCGPA(markRows),
+      recentGrades: markRows.filter((m) => m.grade).slice(-5).map((m) => ({ course: m.courseTitle, grade: m.grade })),
+    };
+
+    const balance = ((fees || []) as any[]).reduce((sum, f) => sum + (Number(f.balance) || 0), 0);
+    const room: any = (hostel as any)?.hostel_rooms;
+    const hostelInfo = room ? { hostelName: room.hostels?.name || 'Hostel', roomNumber: room.room_number || null } : null;
+
+    const { data: classes } = await admin
+      .from('classes')
+      .select('courses(name)')
+      .eq('program', s.program)
+      .eq('branch', s.branch)
+      .eq('semester', s.current_semester)
+      .eq('section', s.section || 'A');
+    const coursesEnrolled = ((classes || []) as any[]).map((c) => c.courses?.name).filter(Boolean);
+
+    return {
+      profile: profile as any,
+      attendance,
+      marks: marksSummary,
+      fees: { balance, status: balance <= 0 ? 'Paid' : 'Pending' },
+      hostelInfo,
+      coursesEnrolled,
+    };
+  } catch (error) {
+    console.error('[getStudentProfileDetails]', error);
+    return null;
+  }
+}
+
+export async function getStudentDashboardData(studentDocId: string): Promise<StudentDashboardData | null> {
+  try {
+    const { studentId } = await requireStudentAccess(studentDocId);
+    const admin = await createServiceRoleClient();
+    const [details, schedule, { data: s }] = await Promise.all([
+      getStudentProfileDetails(studentId),
+      getStudentSchedule(studentId),
+      admin.from('students').select('program, branch, current_semester').eq('id', studentId).single(),
+    ]);
+    if (!details || !s) return null;
+
+    const { data: exam } = await admin
+      .from('exams')
+      .select('exam_type, exam_date, courses(name)')
+      .eq('program', s.program)
+      .eq('branch', s.branch)
+      .eq('semester', s.current_semester)
+      .eq('status', 'Scheduled')
+      .gte('exam_date', todayISODate())
+      .order('exam_date')
+      .limit(1)
+      .maybeSingle();
+
+    return {
+      overallAttendance: details.attendance?.overallPercentage ?? null,
+      coursesEnrolledCount: details.coursesEnrolled?.length || 0,
+      upcomingExam: exam ? { sessionName: exam.exam_type, courseName: (exam as any).courses?.name || 'Course', date: exam.exam_date } : null,
+      schedule,
+    };
+  } catch (error) {
+    console.error('[getStudentDashboardData]', error);
+    return null;
+  }
+}
+
+// ── Teacher ────────────────────────────────────────────────────────────────────
+
+export async function getTeacherProfileDetails(teacherUid: string, extraIds?: { staffDocId?: string | null; email?: string | null }): Promise<any | null> {
+  const caller = await requireRole('teacher', 'emp:student_staff_management', 'emp:exam_marks_management');
+  const admin = await createServiceRoleClient();
+
+  let teacher: any = null;
+  if (caller.role === 'teacher') {
+    ({ data: teacher } = await admin.from('teachers').select('*, profiles(full_name, email, phone, profile_picture_url)').eq('profile_id', caller.userId).maybeSingle());
+  } else {
+    const key = extraIds?.staffDocId || teacherUid;
+    if (!isUuid(key)) return null;
+    ({ data: teacher } = await admin
+      .from('teachers')
+      .select('*, profiles(full_name, email, phone, profile_picture_url)')
+      .or(`profile_id.eq.${key},id.eq.${key}`)
+      .limit(1)
+      .maybeSingle());
+  }
+  if (!teacher) return null;
+
+  const [{ data: classes }, { data: counts }, schedule] = await Promise.all([
+    admin.from('classes').select('id, program, branch, semester, section, classroom_id, courses(id, name, code)').eq('teacher_id', teacher.id),
+    admin.rpc('get_section_student_counts'),
+    getTeacherSchedule(teacher.profile_id),
+  ]);
+
+  const countMap = new Map<string, number>();
+  for (const r of (counts as any[]) || []) countMap.set(`${r.program}|${r.branch}|${r.current_semester}|${r.section}`, Number(r.student_count));
+
+  const coursesAssigned = ((classes || []) as any[]).map((c) => ({
+    id: c.id,
+    code: c.courses?.code || '',
+    name: c.courses?.name || '',
+    class: `${c.program} ${c.branch} ${c.section}`,
+    program: c.program,
+    branch: c.branch,
+    semester: c.semester,
+    classroomId: c.classroom_id || null,
+    studentCount: countMap.get(`${c.program}|${c.branch}|${c.semester}|${c.section}`) || 0,
+  }));
+  const studentsCount = coursesAssigned.reduce((sum, c) => sum + c.studentCount, 0);
+  const p = teacher.profiles || {};
+
+  return {
+    profile: {
+      ...teacher,
+      name: p.full_name || 'Teacher',
+      email: p.email || '',
+      phone: p.phone || teacher.phone || '',
+      avatarUrl: p.profile_picture_url || '',
+      staffId: teacher.employee_code,
+      position: teacher.designation,
+      joinDate: teacher.date_of_joining || teacher.created_at?.split('T')[0],
+      officeLocation: teacher.office_location,
+    },
+    coursesAssigned,
+    studentsCount,
+    classAttendanceRate: null,
+    schedule,
+  };
+}
+
+export async function getTeacherDashboardData(teacherUid: string, extraIds?: { staffDocId?: string | null; email?: string | null }): Promise<TeacherDashboardData> {
+  const caller = await requireRole('teacher');
+  const profile = await getTeacherProfileDetails(pinToSelf(caller, teacherUid), extraIds);
+  if (!profile) throw new Error('Teacher profile not found. Please ask an administrator to verify your teacher record.');
+  const admin = await createServiceRoleClient();
+
+  const today = todayDayName();
+  const todaySchedule = (profile.schedule || [])
+    .filter((s: any) => s.day === today)
+    .sort((a: any, b: any) => a.period - b.period);
+
+  const upcomingClasses = todaySchedule.slice(0, 3).map((s: any) => ({
+    time: PERIOD_SLOTS[s.period]?.title || `Period ${s.period}`,
+    course: s.courseName,
+    class: s.class,
+    location: s.room || 'TBA',
+  }));
+
+  // Exams scheduled for any of the teacher's courses → marks are due for their students.
+  const courseIds = Array.from(new Set(profile.coursesAssigned.map((c: any) => c.id)));
+  let hasPublishedExams = false;
+  if (courseIds.length > 0) {
+    const { data: cls } = await admin.from('classes').select('course_id').in('id', courseIds as string[]);
+    const cids = Array.from(new Set((cls || []).map((c: any) => c.course_id)));
+    if (cids.length) {
+      const { count } = await admin.from('exams').select('id', { count: 'exact', head: true }).in('course_id', cids).eq('status', 'Scheduled');
+      hasPublishedExams = (count || 0) > 0;
     }
+  }
 
-    return result;
+  // Pending marks = students without a final grade in the teacher's classes.
+  const { data: pending } = await admin.rpc('get_teacher_pending_marks', { p_teacher_profile_id: caller.userId });
+
+  // Periods that already ended today without attendance recorded.
+  const now = new Date();
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  const ended = todaySchedule.filter((s: any) => {
+    const slot = PERIOD_SLOTS[s.period];
+    return slot && minutes >= slot.end[0] * 60 + slot.end[1];
+  });
+  const pendingAttendance: PendingAttendanceItem[] = [];
+  if (ended.length > 0) {
+    const { data: taken } = await admin
+      .from('attendance_sessions')
+      .select('class_id, period')
+      .eq('date', todayISODate())
+      .in('class_id', Array.from(new Set(ended.map((e: any) => e.classId))));
+    const done = new Set(((taken || []) as any[]).map((t) => `${t.class_id}|${t.period}`));
+    for (const e of ended) {
+      if (done.has(`${e.classId}|${e.period}`)) continue;
+      pendingAttendance.push({
+        period: e.period,
+        periodTitle: PERIOD_SLOTS[e.period].title,
+        courseName: e.courseName || e.courseCode,
+        className: e.class || '',
+        classId: e.classId,
+      });
+    }
+  }
+
+  return {
+    name: profile.profile.name,
+    coursesTeaching: profile.coursesAssigned.map((c: any) => ({ id: c.id, name: c.name, studentCount: c.studentCount })),
+    upcomingClasses,
+    pendingMarksCount: Number(pending) || 0,
+    hasPublishedExams,
+    pendingAttendance,
+  };
 }
 
+// ── Admin / employee ───────────────────────────────────────────────────────────
+
+export async function getAdminDashboardStats(): Promise<AdminDashboardData> {
+  await requireRole('emp:student_staff_management');
+  const admin = await createServiceRoleClient();
+  const { data, error } = await admin.rpc('get_admin_dashboard_stats');
+  if (error) throw new Error(`Failed to fetch admin dashboard stats: ${error.message}`);
+  const d: any = data || {};
+  return {
+    totalStudents: Number(d.total_students) || 0,
+    totalTeachers: Number(d.total_teachers) || 0,
+    totalPrograms: Number(d.total_programs) || 0,
+    pendingApprovals: Number(d.pending_approvals) || 0,
+    collectionRate: Number(d.collection_rate) || 0,
+    attendanceTrend: (d.attendance_trend || []).map((r: any) => ({ month: r.month, attendance: Number(r.attendance) || 0 })),
+    // Real sign-ins (login_events); falls back to newest accounts before anyone has logged in.
+    recentLogins: ((d.recent_logins?.length ? d.recent_logins : d.recent_users) || []).map((u: any) => ({
+      id: String(u.id),
+      userName: u.full_name || 'User',
+      userRole: u.role,
+      timestamp: u.created_at,
+    })),
+    studentDistribution: (d.student_distribution || []).map((r: any) => ({ branch: r.branch, count: Number(r.count) || 0 })),
+  };
+}
+
+export async function getEmployeeDashboardStats(_profileId?: string): Promise<EmployeeDashboardData> {
+  const caller = await requireRole('employee');
+  const employeeType = caller.employeeType || (caller.role === 'super_admin' ? 'student_staff_management' : '');
+  if (!employeeType) throw new Error('Employee record not found.');
+
+  if (employeeType === 'student_staff_management') {
+    return { employeeType, adminStats: await getAdminDashboardStats() };
+  }
+
+  const admin = await createServiceRoleClient();
+  const { data, error } = await admin.rpc('get_employee_dashboard_stats', { p_employee_type: employeeType });
+  if (error) throw new Error(error.message);
+  const d: any = data || {};
+  const num = (v: any) => (v === undefined || v === null ? undefined : Number(v));
+  return {
+    employeeType,
+    totalFees: num(d.total_fees),
+    collectedFees: num(d.collected_fees),
+    pendingFees: num(d.pending_fees),
+    collectionRate: num(d.collection_rate),
+    totalRooms: num(d.total_rooms),
+    occupiedRooms: num(d.occupied_beds),
+    availableRooms: num(d.available_beds),
+    totalHostelStudents: num(d.hostel_students),
+    totalExams: num(d.total_exams),
+    scheduledExams: num(d.scheduled_exams),
+    totalClasses: num(d.total_classes),
+    totalCourses: num(d.total_courses),
+    marksEntered: num(d.marks_entered),
+    totalBooks: num(d.total_books),
+    availableBooks: num(d.available_books),
+    issuedBooks: num(d.issued_books),
+  };
+}

@@ -22,6 +22,8 @@ export interface AppUser {
   collegeId?: string | null;
   staffId?: string | null;
   type?: string | null;
+  /** Active backlogs (students only) — the Backlogs page is shown only when > 0. */
+  backlogCount?: number;
 }
 
 // Global cache to prevent multiple parallel or redundant server action POSTs across components
@@ -64,9 +66,14 @@ export function useAuthProtection(expectedRoles?: string | string[]) {
         if (error || !data?.session || !data?.profile) {
             if (mounted) {
               setAuthIsLoading(false);
-              setLayoutError(`Session load failed: ${error || 'Missing profile or session data'}`)
-              // Temporarily removing router.push so we can read the exact error message!
-              // router.push('/login');
+              if (!data?.session) {
+                // Session expired or signed out elsewhere → back to login.
+                cachedSessionPromise = null;
+                router.replace('/login');
+              } else {
+                // Signed in but no profile row: show the reason instead of looping on /login.
+                setLayoutError(error || 'Your account has no profile. Please contact the administrator.');
+              }
             }
             return;
         }
@@ -95,6 +102,7 @@ export function useAuthProtection(expectedRoles?: string | string[]) {
           avatarUrl: profile.avatar_url || undefined,
           id: profile.id,
           type: (data as any).userType || null,
+          backlogCount: (data as any).backlogCount || 0,
         };
 
         if (mounted) {

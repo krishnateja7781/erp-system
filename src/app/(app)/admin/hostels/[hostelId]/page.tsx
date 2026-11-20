@@ -18,9 +18,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { getHostelDetails, updateHostelInfo, addHostelRoom, deleteHostelRoom, allocateStudentToRoom, removeStudentFromRoom, updateComplaintStatus, deleteHostel, getUnallocatedStudentsCount } from '@/actions/hostel-actions';
+import { getHostelDetails, updateHostelInfo, addHostelRoom, deleteHostelRoom, allocateStudentToRoom, removeStudentFromRoom, updateComplaintStatus, deleteHostel, getUnallocatedStudentsCount, getAllocatableStudents } from '@/actions/hostel-actions';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { getStudents } from '@/actions/student-actions';
 import type { Student, HostelDetails, Room, Complaint } from '@/lib/types';
 import { useAuthProtection } from '@/hooks/useAuthProtection';
 
@@ -240,17 +239,17 @@ export default function AdminHostelDetailPage() {
         if (!hostelId) { setError("Invalid Hostel ID."); setIsLoading(false); return; }
         setIsLoading(true); setError(null);
         try {
-            const [data, studentsData] = await Promise.all([
+            const [data, allocatable, count] = await Promise.all([
                 getHostelDetails(hostelId),
-                getStudents()
+                getAllocatableStudents(hostelId),
+                getUnallocatedStudentsCount(),
             ]);
             if (data) {
                 setHostelData(data);
-                const count = await getUnallocatedStudentsCount();
                 setUnallocatedCount(count);
             }
             else { setError("Hostel not found."); router.push(isEmployee ? '/employee/hostel' : '/admin/hostels'); }
-            setAllStudents(studentsData);
+            setAllStudents(allocatable as unknown as Student[]);
         } catch (err: any) {
             console.error("Failed to fetch hostel details:", err);
             setError("Failed to load hostel data. Please try refreshing.");
@@ -301,7 +300,7 @@ export default function AdminHostelDetailPage() {
         const lowerSearch = roomSearchTerm.toLowerCase();
         return hostelData.rooms.filter(room =>
             room.roomNumber?.toLowerCase().includes(lowerSearch) ||
-            room.residents?.some(res => res?.studentName?.toLowerCase().includes(lowerSearch) || res?.studentId?.toLowerCase().includes(lowerSearch))
+            room.residents?.some(res => res?.studentName?.toLowerCase().includes(lowerSearch) || res?.studentId?.toLowerCase().includes(lowerSearch) || res?.collegeId?.toLowerCase().includes(lowerSearch))
         ).sort((a, b) => (a.roomNumber || '').localeCompare(b.roomNumber || '', undefined, { numeric: true }));
     }, [hostelData, roomSearchTerm]);
 
@@ -310,13 +309,8 @@ export default function AdminHostelDetailPage() {
         return new Set(hostelData.rooms.flatMap(r => r.residents?.map(res => res.studentId) || []));
     }, [hostelData]);
 
-    const availableStudentsForHostel = React.useMemo(() => {
-        if (!hostelData?.type || !allStudents) return [];
-        const requiredGender = hostelData.type === 'Boys' ? 'Male' : 'Female';
-        return allStudents.filter(student =>
-            !assignedStudentIds.has(student.id) && student.gender === requiredGender && student.type === 'Hosteler'
-        );
-    }, [allStudents, assignedStudentIds, hostelData?.type]);
+    // Already filtered in SQL: hostelers of the right gender with no active bed in ANY hostel.
+    const availableStudentsForHostel = allStudents;
 
     const handleOpenManageRoom = (room: Room) => { setSelectedRoomToManage(room); setDialogs(d => ({ ...d, manageRoom: true })); };
 
@@ -427,7 +421,7 @@ export default function AdminHostelDetailPage() {
                 <Card><CardHeader><CardTitle className="flex items-center justify-between"><div className='flex items-center gap-2'><div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-red-500 to-red-600 text-white shadow-md shadow-red-500/20"><Wrench className="h-4 w-4" /></div> Complaints</div></CardTitle><CardDescription>Maintenance issues reported.</CardDescription></CardHeader>
                     <CardContent>
                         <Table><TableHeader><TableRow className="border-border/30"><TableHead>Room</TableHead><TableHead>Issue</TableHead><TableHead>Reported By</TableHead><TableHead>Date</TableHead><TableHead className="text-right">Status</TableHead></TableRow></TableHeader>
-                            <TableBody>{hostelData.complaints.map((c) => (<TableRow key={c.id} className="hover:bg-indigo-50/50 dark:hover:bg-indigo-950/20 border-border/20"><TableCell>{c.roomNumber}</TableCell><TableCell>{c.issue}</TableCell><TableCell><Link href={`/admin/students/${c.studentId}`} className='text-primary hover:underline text-xs'>{c.studentId}</Link></TableCell><TableCell>{c.date}</TableCell><TableCell className="text-right"><DropdownMenu><DropdownMenuTrigger asChild disabled={actionLoading[c.id]}><Button variant="ghost" size="sm" className="h-auto py-0.5 px-1.5">{actionLoading[c.id] ? <Loader2 className="h-4 w-4 animate-spin" /> : getComplaintStatusBadge(c.status)}</Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={() => handleComplaintStatusChange(c.id, 'Pending')}><RotateCw className="mr-2 h-4 w-4 text-destructive" />Pending</DropdownMenuItem><DropdownMenuItem onClick={() => handleComplaintStatusChange(c.id, 'In Progress')}><RotateCw className="mr-2 h-4 w-4 text-yellow-600" />In Progress</DropdownMenuItem><DropdownMenuItem onClick={() => handleComplaintStatusChange(c.id, 'Resolved')}><Check className="mr-2 h-4 w-4 text-green-600" />Resolved</DropdownMenuItem></DropdownMenuContent></DropdownMenu></TableCell></TableRow>))}</TableBody>
+                            <TableBody>{hostelData.complaints.map((c) => (<TableRow key={c.id} className="hover:bg-indigo-50/50 dark:hover:bg-indigo-950/20 border-border/20"><TableCell>{c.roomNumber}</TableCell><TableCell>{c.issue}</TableCell><TableCell>{isEmployee ? <span className='text-xs font-mono'>{c.collegeId || c.studentId}</span> : <Link href={`/admin/students/${c.studentId}`} className='text-primary hover:underline text-xs font-mono'>{c.collegeId || c.studentId}</Link>}</TableCell><TableCell>{c.date}</TableCell><TableCell className="text-right"><DropdownMenu><DropdownMenuTrigger asChild disabled={actionLoading[c.id]}><Button variant="ghost" size="sm" className="h-auto py-0.5 px-1.5">{actionLoading[c.id] ? <Loader2 className="h-4 w-4 animate-spin" /> : getComplaintStatusBadge(c.status)}</Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={() => handleComplaintStatusChange(c.id, 'Pending')}><RotateCw className="mr-2 h-4 w-4 text-destructive" />Pending</DropdownMenuItem><DropdownMenuItem onClick={() => handleComplaintStatusChange(c.id, 'In Progress')}><RotateCw className="mr-2 h-4 w-4 text-yellow-600" />In Progress</DropdownMenuItem><DropdownMenuItem onClick={() => handleComplaintStatusChange(c.id, 'Resolved')}><Check className="mr-2 h-4 w-4 text-green-600" />Resolved</DropdownMenuItem></DropdownMenuContent></DropdownMenu></TableCell></TableRow>))}</TableBody>
                         </Table>
                     </CardContent>
                 </Card>

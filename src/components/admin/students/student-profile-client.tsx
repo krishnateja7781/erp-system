@@ -16,13 +16,16 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { deleteStudent } from '@/actions/student-actions';
 import type { FullStudentData } from '@/lib/types';
 import { AddStudentDialog } from '@/components/admin/students/add-student-dialog';
+import { StudentRecordsDialog } from '@/components/admin/students/student-records-dialog';
 
 
 interface StudentProfileClientPageProps {
     initialStudentData: FullStudentData;
+    /** Portal this page lives in, so navigation stays inside it. */
+    basePath?: '/admin' | '/employee';
 }
 
-export function StudentProfileClientPage({ initialStudentData }: StudentProfileClientPageProps) {
+export function StudentProfileClientPage({ initialStudentData, basePath = '/admin' }: StudentProfileClientPageProps) {
     const router = useRouter();
     const { toast } = useToast();
     const [studentData] = React.useState<FullStudentData>(initialStudentData);
@@ -40,19 +43,21 @@ export function StudentProfileClientPage({ initialStudentData }: StudentProfileC
 
         if (result.success) {
             toast({ title: "Student Deleted", description: result.message });
-            router.push('/admin/students');
+            router.push(`${basePath}/students`);
         } else {
             toast({ variant: "destructive", title: "Deletion Failed", description: result.error });
         }
     };
 
-    const handleViewAttendanceLog = () => toast({ title: "Info", description: "Detailed attendance log view not implemented." });
-    const handleViewMarksSheet = () => toast({ title: "Info", description: "Detailed marks sheet view not implemented." });
+    const [recordsMode, setRecordsMode] = React.useState<'attendance' | 'marks' | null>(null);
+    const handleViewAttendanceLog = () => setRecordsMode('attendance');
+    const handleViewMarksSheet = () => setRecordsMode('marks');
 
     const { profile, attendance, marks, hostelInfo } = studentData;
 
     return (
         <>
+            <StudentRecordsDialog studentId={studentData.profile.id} studentName={studentData.profile.name || "Student"} mode={recordsMode} onClose={() => setRecordsMode(null)} />
             <div className="space-y-6">
                 <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-violet-600 to-purple-500 p-6 text-white shadow-lg">
                     <div className="relative z-10">

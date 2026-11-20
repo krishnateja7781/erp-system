@@ -1,356 +1,230 @@
 'use server';
 
-import { createServiceRoleClient as createServerSupabaseClient } from '@/lib/supabase';
-import { getSession } from './auth-actions';
+import { createServiceRoleClient } from '@/lib/supabase';
+import { requireRole, pinToSelf, assertClassAccess, type Caller } from '@/lib/auth-guard';
+import { periodFromStartTime } from '@/lib/utils';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-export interface StudentForClass {
-    id: string;
-    name: string;
-    collegeId: string;
-    email: string;
-}
-
-export interface TeacherCourseOption {
-    id: string;
-    name: string;
-    code: string;
-}
-
-export interface TeacherSectionOption {
-    id: string;
-    name: string;
-}
-
+export interface StudentForClass { id: string; name: string; collegeId: string; email: string; section?: string | null; }
+export interface TeacherCourseOption { id: string; name: string; code: string; }
+export interface TeacherSectionOption { id: string; name: string; }
 export interface AttendanceLogEntry {
-    classId: string;
-    date: string;
-    period: number;
-    courseName: string;
-    courseCode: string;
-    class: string;
-    studentCount: number;
+  classId: string; date: string; period: number; courseName: string; courseCode: string; class: string; studentCount: number;
+}
+export interface TeacherScheduledSession { name: string; startDate: string; endDate: string; }
+export interface TeacherClassWithStudents {
+  classInfo: { id: string; courseCode: string; courseName: string; class: string };
+  students: StudentForClass[];
 }
 
-export interface TeacherScheduledSession {
-    name: string;
-    startDate: string;
-    endDate: string;
+const TEACHING_STAFF = ['teacher', 'emp:exam_marks_management'] as const;
+
+const classLabel = (c: any) => `${c?.program || ''} ${c?.branch || ''} ${c?.section || ''}`.trim();
+
+/** Resolves the teachers.id the caller is acting as (teachers are pinned to themselves). */
+async function actingTeacherId(caller: Caller, requestedProfileId: string): Promise<string | null> {
+  const profileId = pinToSelf(caller, requestedProfileId);
+  const admin = await createServiceRoleClient();
+  const { data } = await admin.from('teachers').select('id').eq('profile_id', profileId).maybeSingle();
+  return data?.id ?? null;
 }
 
-// ── Internal Helper ────────────────────────────────────────────────────────────
-
-async function getTeacherId(): Promise<string | null> {
-    const result = await getSession();
-    if (!result || result.error || !result.data?.session) return null;
-    return result.data.session.user.id;
+/** Roster of a class: active students matching its program/branch/semester/section. */
+async function rosterFor(admin: any, cls: { program: string; branch: string; semester: number; section: string | null }): Promise<StudentForClass[]> {
+  const { data } = await admin
+    .from('students')
+    .select('id, college_id, section, profiles(full_name, email)')
+    .eq('program', cls.program)
+    .eq('branch', cls.branch)
+    .eq('current_semester', cls.semester)
+    .eq('section', cls.section || 'A')
+    .eq('status', 'Active')
+    .order('college_id')
+    .limit(1000);
+  return (data || []).map((s: any) => ({
+    id: s.id,
+    name: s.profiles?.full_name || 'Unknown',
+    collegeId: s.college_id,
+    email: s.profiles?.email || '',
+    section: s.section || null,
+  }));
 }
 
-async function resolveTeacherId(supabase: any, profileId: string): Promise<string | null> {
-    const { data } = await supabase.from('teachers').select('id').eq('profile_id', profileId).single();
-    return data?.id || null;
-}
+// ── Queries ────────────────────────────────────────────────────────────────────
 
-// ── Get Teacher's Classes ──────────────────────────────────────────────────────
+export async function getMyTeacherId(): Promise<string | null> {
+  const caller = await requireRole('teacher').catch(() => null);
+  return caller?.userId ?? null;
+}
 
 export async function getTeacherClasses(teacherProfileId: string) {
-    const supabase = await createServerSupabaseClient();
-    const dbTeacherId = await resolveTeacherId(supabase, teacherProfileId);
-    if (!dbTeacherId) return [];
-
-    const { data, error } = await supabase
-        .from('classes')
-        .select('id, program, branch, section, courses(id, name, code)')
-        .eq('teacher_id', dbTeacherId);
-
-    if (error || !data) return [];
-
-    return data.map((c: any) => ({
-        id: c.id,
-        class: `${c.program || ''} ${c.branch || ''} ${c.section || ''}`.trim(),
-        courseCode: c.courses?.code || '',
-        courseName: c.courses?.name || '',
-    }));
+  const caller = await requireRole(...TEACHING_STAFF);
+  const teacherId = await actingTeacherId(caller, teacherProfileId);
+  if (!teacherId) return [];
+  const admin = await createServiceRoleClient();
+  const { data } = await admin
+    .from('classes')
+    .select('id, program, branch, section, courses(id, name, code)')
+    .eq('teacher_id', teacherId);
+  return (data || []).map((c: any) => ({
+    id: c.id,
+    class: classLabel(c),
+    courseCode: c.courses?.code || '',
+    courseName: c.courses?.name || '',
+  }));
 }
-
-// ── Get Students for a Class ───────────────────────────────────────────────────
 
 export async function getStudentsForClass(classId: string): Promise<StudentForClass[]> {
-    const supabase = await createServerSupabaseClient();
-
-    // 1. Fetch class details to know which students belong to it
-    const { data: cls } = await supabase.from('classes').select('program, branch, semester, section').eq('id', classId).single();
-    if (!cls) return [];
-
-    // 2. Query students matching those class criteria
-    const { data: studentRecords, error } = await supabase
-        .from('students')
-        .select('id, college_id, profiles(full_name, email)')
-        .eq('program', cls.program)
-        .eq('branch', cls.branch)
-        .eq('current_semester', cls.semester)
-        .eq('section', cls.section || 'A')
-        .eq('is_graduated', false)
-        .order('college_id');
-
-    if (error || !studentRecords) return [];
-
-    return studentRecords.map((s: any) => ({
-        id: s.id,
-        name: s.profiles?.full_name || 'Unknown',
-        collegeId: s.college_id,
-        email: s.profiles?.email || '',
-    }));
+  const caller = await requireRole(...TEACHING_STAFF);
+  await assertClassAccess(caller, classId);
+  const admin = await createServiceRoleClient();
+  const { data: cls } = await admin.from('classes').select('program, branch, semester, section').eq('id', classId).maybeSingle();
+  if (!cls) return [];
+  return rosterFor(admin, cls);
 }
 
-// ── Get Teacher's Schedule ─────────────────────────────────────────────────────
-
 export async function getTeacherSchedule(teacherProfileId: string) {
-    const supabase = await createServerSupabaseClient();
-    const dbTeacherId = await resolveTeacherId(supabase, teacherProfileId);
-    if (!dbTeacherId) return [];
+  const caller = await requireRole(...TEACHING_STAFF);
+  const teacherId = await actingTeacherId(caller, teacherProfileId);
+  if (!teacherId) return [];
+  const admin = await createServiceRoleClient();
 
-    // Get all classes assigned to this teacher
-    const { data: classesData, error: classesError } = await supabase
-        .from('classes')
-        .select('*, courses(name, code)')
-        .eq('teacher_id', dbTeacherId);
+  const { data: classes } = await admin
+    .from('classes')
+    .select('id, program, branch, section, course_id, courses(name, code), timetables(id, day_of_week, start_time, room)')
+    .eq('teacher_id', teacherId);
 
-    if (classesError || !classesData || classesData.length === 0) return [];
-    
-    const classIds = classesData.map(c => c.id);
-
-    // Get timetables for those classes
-    const { data: timetables, error: ttError } = await supabase
-        .from('timetables')
-        .select('*')
-        .in('class_id', classIds);
-
-    if (ttError || !timetables) return [];
-
-    return timetables.map((entry: any) => {
-        const cls: any = classesData.find((c: any) => c.id === entry.class_id);
-        const className = `${cls?.program} ${cls?.branch} ${cls?.section}`;
-
-        let periodVal = 1;
-        if (entry.start_time) {
-            periodVal = parseInt(entry.start_time.split(':')[0], 10);
-        }
-
-        return {
-            id: entry.id,
-            day: entry.day_of_week,
-            period: periodVal,
-            classId: entry.class_id,
-            className: className,
-            courseName: cls?.courses?.name,
-            courseCode: cls?.courses?.code,
-            teacherId: teacherProfileId
-        };
-    });
+  const out: any[] = [];
+  for (const c of (classes || []) as any[]) {
+    for (const t of c.timetables || []) {
+      out.push({
+        id: t.id,
+        day: t.day_of_week,
+        period: periodFromStartTime(t.start_time),
+        classId: c.id,
+        className: classLabel(c),
+        class: classLabel(c),
+        courseId: c.courses?.code || c.course_id,
+        courseName: c.courses?.name,
+        courseCode: c.courses?.code,
+        room: t.room || null,
+        teacherId: pinToSelf(caller, teacherProfileId),
+      });
+    }
+  }
+  return out;
 }
 
 export async function getTeacherAttendanceLogs(teacherProfileId: string): Promise<AttendanceLogEntry[]> {
-    const supabase = await createServerSupabaseClient();
-    // In attendance schema, teacher_id actually points to the profile_id (originally marked_by_id)
-    
-    const { data, error } = await supabase
-        .from('attendance')
-        .select('class_id, date, period, classes(program, branch, section, courses(name, code))')
-        .eq('teacher_id', teacherProfileId)
-        .order('date', { ascending: false })
-        .limit(100);
-
-    if (error || !data) return [];
-
-    // Group by class+date+period
-    const grouped: Record<string, AttendanceLogEntry> = {};
-    for (const row of data as any[]) {
-        const key = `${row.class_id}_${row.date}_${row.period}`;
-        if (!grouped[key]) {
-            const clsData = row.classes || {};
-            grouped[key] = {
-                classId: row.class_id,
-                date: row.date,
-                period: row.period,
-                courseName: clsData.courses?.name || '',
-                courseCode: clsData.courses?.code || '',
-                class: `${clsData.program || ''} ${clsData.branch || ''} ${clsData.section || ''}`.trim(),
-                studentCount: 0,
-            };
-        }
-        grouped[key].studentCount++;
-    }
-
-    return Object.values(grouped);
+  const caller = await requireRole(...TEACHING_STAFF);
+  const profileId = pinToSelf(caller, teacherProfileId);
+  const admin = await createServiceRoleClient();
+  // Aggregated in SQL: one row per (class, date, period) session.
+  const { data, error } = await admin.rpc('get_teacher_attendance_sessions', { p_teacher_profile_id: profileId, p_limit: 100 });
+  if (error || !data) return [];
+  return (data as any[]).map((r) => ({
+    classId: r.class_id,
+    date: r.date,
+    period: r.period,
+    courseName: r.course_name || '',
+    courseCode: r.course_code || '',
+    class: `${r.program || ''} ${r.branch || ''} ${r.section || ''}`.trim(),
+    studentCount: Number(r.student_count) || 0,
+  }));
 }
-
-// ── Get Attendance for specific Slot ──────────────────────────────────────────
 
 export async function getAttendanceForSlot(classId: string, date: string, period: number): Promise<Record<string, 'Present' | 'Absent'>> {
-    const supabase = await createServerSupabaseClient();
-
-    const { data, error } = await supabase
-        .from('attendance')
-        .select('student_id, status')
-        .eq('class_id', classId)
-        .eq('date', date)
-        .eq('period', period);
-
-    if (error || !data) return {};
-
-    const result: Record<string, 'Present' | 'Absent'> = {};
-    for (const row of data as any[]) {
-        result[row.student_id] = row.status;
-    }
-    return result;
+  const caller = await requireRole(...TEACHING_STAFF);
+  await assertClassAccess(caller, classId);
+  const admin = await createServiceRoleClient();
+  const { data } = await admin
+    .from('attendance')
+    .select('student_id, status')
+    .eq('class_id', classId)
+    .eq('date', date)
+    .eq('period', period)
+    .limit(1000);
+  const result: Record<string, 'Present' | 'Absent'> = {};
+  for (const row of (data || []) as any[]) result[row.student_id] = row.status;
+  return result;
 }
 
-// ── Get Courses for Marks Entry ────────────────────────────────────────────────
-
-export async function getTeacherCoursesForMarks(teacherProfileId: string, session: string): Promise<TeacherCourseOption[]> {
-    const supabase = await createServerSupabaseClient();
-    const dbTeacherId = await resolveTeacherId(supabase, teacherProfileId);
-    if (!dbTeacherId) return [];
-
-    const { data, error } = await supabase
-        .from('classes')
-        .select('courses(id, name, code)')
-        .eq('teacher_id', dbTeacherId);
-
-    if (error || !data) return [];
-
-    const seen = new Set<string>();
-    const result: TeacherCourseOption[] = [];
-    for (const c of data as any[]) {
-        const course = Array.isArray(c.courses) ? c.courses[0] : c.courses;
-        if (course && !seen.has(course.id)) {
-            seen.add(course.id);
-            result.push({ id: course.id, name: course.name, code: course.code });
-        }
-    }
-    return result;
+export async function getTeacherCoursesForMarks(teacherProfileId: string, _session: string): Promise<TeacherCourseOption[]> {
+  const caller = await requireRole(...TEACHING_STAFF);
+  const teacherId = await actingTeacherId(caller, teacherProfileId);
+  if (!teacherId) return [];
+  const admin = await createServiceRoleClient();
+  const { data } = await admin.from('classes').select('courses(id, name, code)').eq('teacher_id', teacherId);
+  const seen = new Map<string, TeacherCourseOption>();
+  for (const c of (data || []) as any[]) {
+    const course = Array.isArray(c.courses) ? c.courses[0] : c.courses;
+    if (course && !seen.has(course.id)) seen.set(course.id, { id: course.id, name: course.name, code: course.code });
+  }
+  return Array.from(seen.values());
 }
-
-// ── Get Sections for a Course ──────────────────────────────────────────────────
 
 export async function getTeacherSectionsForCourse(teacherProfileId: string, courseId: string): Promise<TeacherSectionOption[]> {
-    const supabase = await createServerSupabaseClient();
-    const dbTeacherId = await resolveTeacherId(supabase, teacherProfileId);
-    if (!dbTeacherId) return [];
-
-    const { data, error } = await supabase
-        .from('classes')
-        .select('id, program, branch, section')
-        .eq('teacher_id', dbTeacherId)
-        .eq('course_id', courseId);
-
-    if (error || !data) return [];
-    return data.map((c: any) => ({ id: c.id, name: `${c.program || ''} ${c.branch || ''} ${c.section || ''}`.trim() }));
+  const caller = await requireRole(...TEACHING_STAFF);
+  const teacherId = await actingTeacherId(caller, teacherProfileId);
+  if (!teacherId) return [];
+  const admin = await createServiceRoleClient();
+  const { data } = await admin
+    .from('classes')
+    .select('id, program, branch, section')
+    .eq('teacher_id', teacherId)
+    .eq('course_id', courseId);
+  return (data || []).map((c: any) => ({ id: c.id, name: classLabel(c) }));
 }
-
-// ── Get Scheduled Exam Sessions ────────────────────────────────────────────────
 
 export async function getTeacherScheduledSessions(teacherProfileId: string): Promise<TeacherScheduledSession[]> {
-    const supabase = await createServerSupabaseClient();
-    const dbTeacherId = await resolveTeacherId(supabase, teacherProfileId);
-    if (!dbTeacherId) return [];
+  const caller = await requireRole(...TEACHING_STAFF);
+  const teacherId = await actingTeacherId(caller, teacherProfileId);
+  if (!teacherId) return [];
+  const admin = await createServiceRoleClient();
 
-    const { data: clsData } = await supabase.from('classes').select('course_id').eq('teacher_id', dbTeacherId);
-    if (!clsData || clsData.length === 0) return [];
-    
-    const courseIds = clsData.map(c => c.course_id);
+  const { data: cls } = await admin.from('classes').select('course_id').eq('teacher_id', teacherId);
+  const courseIds = Array.from(new Set((cls || []).map((c: any) => c.course_id)));
+  if (courseIds.length === 0) return [];
 
-    const { data, error } = await supabase
-        .from('exams')
-        .select('exam_type, exam_date')
-        .in('course_id', courseIds)
-        .order('exam_date');
+  const { data } = await admin
+    .from('exams')
+    .select('exam_type, exam_date')
+    .in('course_id', courseIds)
+    .neq('status', 'Cancelled')
+    .order('exam_date');
 
-    if (error || !data) return [];
-
-    const seen = new Set<string>();
-    const result: TeacherScheduledSession[] = [];
-    for (const row of data as any[]) {
-        const key = row.exam_type;
-        if (!key) continue;
-        
-        if (!seen.has(key)) {
-            seen.add(key);
-            result.push({ name: key, startDate: row.exam_date || '', endDate: row.exam_date || '' });
-        } else {
-            // Update endDate if exam_date is later
-            const existing = result.find(r => r.name === key);
-            if (existing && row.exam_date && new Date(row.exam_date) > new Date(existing.endDate)) {
-                existing.endDate = row.exam_date;
-            }
-        }
-    }
-
-    if (!seen.has('Others')) {
-        result.push({ 
-            name: 'Others', 
-            startDate: new Date().toISOString(), 
-            endDate: new Date().toISOString() 
-        });
-    }
-
-    return result;
+  const sessions = new Map<string, TeacherScheduledSession>();
+  for (const row of (data || []) as any[]) {
+    if (!row.exam_type) continue;
+    const s = sessions.get(row.exam_type);
+    if (!s) sessions.set(row.exam_type, { name: row.exam_type, startDate: row.exam_date || '', endDate: row.exam_date || '' });
+    else if (row.exam_date && row.exam_date > s.endDate) s.endDate = row.exam_date;
+  }
+  if (!sessions.has('Others')) {
+    const today = new Date().toISOString();
+    sessions.set('Others', { name: 'Others', startDate: today, endDate: today });
+  }
+  return Array.from(sessions.values());
 }
 
-// ── Server-side safe teacherId getter (for pages) ─────────────────────────────
-
-export async function getMyTeacherId(): Promise<string | null> {
-    return getTeacherId();
-}
-
-export interface TeacherClassWithStudents {
-    classInfo: { id: string; courseCode: string; courseName: string; class: string; };
-    students: any[];
-}
-
-// BUG FIX #10: Implement getStudentsByClassForTeacher (was stub always returning [])
 export async function getStudentsByClassForTeacher(teacherProfileId: string): Promise<TeacherClassWithStudents[]> {
-    const supabase = await createServerSupabaseClient();
-    const dbTeacherId = await resolveTeacherId(supabase, teacherProfileId);
-    if (!dbTeacherId) return [];
+  const caller = await requireRole(...TEACHING_STAFF);
+  const teacherId = await actingTeacherId(caller, teacherProfileId);
+  if (!teacherId) return [];
+  const admin = await createServiceRoleClient();
+  const { data: classes } = await admin
+    .from('classes')
+    .select('id, program, branch, semester, section, courses(id, name, code)')
+    .eq('teacher_id', teacherId);
 
-    const { data: classes, error } = await supabase
-        .from('classes')
-        .select('id, program, branch, semester, section, courses(id, name, code)')
-        .eq('teacher_id', dbTeacherId);
-
-    if (error || !classes) return [];
-
-    const result: TeacherClassWithStudents[] = [];
-    for (const c of classes as any[]) {
-        const course = Array.isArray(c.courses) ? c.courses[0] : c.courses;
-        const { data: studentRecords } = await supabase
-            .from('students')
-            .select('id, college_id, profiles(full_name, email)')
-            .eq('program', c.program)
-            .eq('branch', c.branch)
-            .eq('current_semester', c.semester)
-            .eq('section', c.section || 'A')
-            .eq('is_graduated', false)
-            .order('college_id');
-
-        result.push({
-            classInfo: {
-                id: c.id,
-                courseCode: course?.code || '',
-                courseName: course?.name || '',
-                class: `${c.program || ''} ${c.branch || ''} ${c.section || ''}`.trim(),
-            },
-            students: (studentRecords || []).map((s: any) => ({
-                id: s.id,
-                name: s.profiles?.full_name || 'Unknown',
-                collegeId: s.college_id,
-                email: s.profiles?.email || '',
-            })),
-        });
-    }
-    return result;
+  return Promise.all(
+    ((classes || []) as any[]).map(async (c) => {
+      const course = Array.isArray(c.courses) ? c.courses[0] : c.courses;
+      return {
+        classInfo: { id: c.id, courseCode: course?.code || '', courseName: course?.name || '', class: classLabel(c) },
+        students: await rosterFor(admin, c),
+      };
+    }),
+  );
 }
-

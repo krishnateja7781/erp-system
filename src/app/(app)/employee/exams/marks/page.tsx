@@ -54,7 +54,7 @@ export default function EmployeeMarksPage() {
             setIsLoadingExams(true);
             try {
                 const exams = await getExamSchedules();
-                const filtered = exams.filter(e => e.status === 'Scheduled' || e.status === 'Expired');
+                const filtered = exams.filter(e => e.status !== 'Cancelled');
                 setExamSchedules(filtered);
                 const grouped = filtered.reduce((acc, e) => {
                     const sessionName = e.examSessionName || e.examType || 'Uncategorized';

@@ -321,6 +321,7 @@ export interface Complaint {
   id: string;
   student_id: string;
   studentId?: string;
+  collegeId?: string;
   room_id?: string;
   roomNumber?: string;
   issue?: string;
@@ -425,6 +426,8 @@ export interface Classroom {
   inviteCode?: string;
   subject?: string;
   memberUids?: string[];
+  /** Maintained by the database (classrooms.member_count). */
+  memberCount?: number;
   ownerId?: string;
   ownerName?: string;
   createdAt?: string;
@@ -482,6 +485,7 @@ export interface CourseOption {
 }
 
 export interface HallTicketData {
+  hallTicketNumber?: string;
   studentName?: string;
   collegeId?: string;
   studentCollegeId?: string;

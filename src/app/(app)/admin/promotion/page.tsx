@@ -1,4 +1,5 @@
 'use client';
+import { PROGRAMS, BRANCHES } from '@/lib/academic-codes';
 
 import * as React from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -27,11 +28,6 @@ const Checkbox = React.forwardRef<HTMLButtonElement, any>(({ checked, onCheckedC
 ));
 Checkbox.displayName = "Checkbox";
 
-const PROGRAMS = ["B.Tech", "MBA", "Law", "MBBS", "B.Sc", "B.Com"];
-const BRANCHES: Record<string, string[]> = {
-    "B.Tech": ["CSE", "ECE", "MECH", "IT", "AI&ML", "DS", "CIVIL", "Other"],
-    "MBA": ["Marketing", "Finance", "HR", "Operations", "General", "Other"]
-};
 const SEMESTERS = [1, 2, 3, 4, 5, 6, 7, 8];
 
 export default function AdminPromotionPage() {

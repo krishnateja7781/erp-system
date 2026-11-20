@@ -35,6 +35,14 @@ export function LoginForm() {
     defaultValues: { email: "", password: "" },
   });
 
+  // Explain why the user landed here (expired reset link).
+  React.useEffect(() => {
+    const err = new URLSearchParams(window.location.search).get('error');
+    if (err === 'link_expired') {
+      toast({ variant: 'destructive', title: 'Link expired', description: 'That email link is invalid or has expired. Please request a new one.' });
+    }
+  }, [toast]);
+
   async function onSubmit(values: z.infer<typeof formSchema>) {
     setIsLoading(true);
 
@@ -69,6 +77,13 @@ export function LoginForm() {
 
       // Hard navigate — ensures the browser picks up newly-set session cookies
       // on a fresh full HTTP request. Middleware will detect the role and route correctly.
+      // Return to the page the user originally asked for (same-site paths only);
+      // middleware still enforces that the role may open it.
+      const next = new URLSearchParams(window.location.search).get('next');
+      if (next && next.startsWith('/') && !next.startsWith('//')) {
+        window.location.href = next;
+        return;
+      }
       const role = result.role;
       if (role === 'super_admin') {
         window.location.href = '/admin/dashboard';

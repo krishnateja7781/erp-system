@@ -176,7 +176,7 @@ export default function EmployeeManageStaffPage() {
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end" className="w-44">
-                                <DropdownMenuItem className="gap-2 cursor-pointer" onClick={() => router.push(`/admin/students/${s.id}`)}>
+                                <DropdownMenuItem className="gap-2 cursor-pointer" onClick={() => router.push(`/employee/students/${s.id}`)}>
                                   <Eye className="h-4 w-4" /> View Profile
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />

@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { getBooks, addBook, deleteBook } from '@/actions/library-actions';
 import { useToast } from '@/hooks/use-toast';
 import type { Book } from '@/lib/types';
+import { LoansPanel } from '@/components/library/loans-panel';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 
 export default function EmployeeLibraryPage() {
@@ -58,7 +59,7 @@ export default function EmployeeLibraryPage() {
         isbn: formData.isbn,
         category: formData.category,
         publisher: formData.publisher,
-        published_year: parseInt(formData.published_year) || new Date().getFullYear(),
+        published_year: parseInt(formData.published_year) || undefined,
         total_copies: parseInt(formData.total_copies) || 1,
         source: formData.source as any
       });
@@ -247,6 +248,8 @@ export default function EmployeeLibraryPage() {
              </DialogFooter>
           </DialogContent>
       </Dialog>
+
+      <LoansPanel books={books} onChanged={loadBooks} />
     </div>
   );
 }

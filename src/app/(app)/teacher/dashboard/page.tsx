@@ -150,11 +150,9 @@ export default function TeacherDashboardPage() {
                                 <p className="text-sm text-muted-foreground">No classes scheduled for today.</p>
                             </div>
                         )}
-                        <Link href="/teacher/profile" passHref>
-                          <Button variant="ghost" size="sm" className="w-full mt-2 text-xs text-muted-foreground hover:text-foreground">
+                        <Button asChild variant="ghost" size="sm" className="w-full mt-2 text-xs text-muted-foreground hover:text-foreground"><Link href="/teacher/profile">
                             View Full Timetable →
-                          </Button>
-                        </Link>
+                          </Link></Button>
                     </CardContent>
                 </Card>
                 

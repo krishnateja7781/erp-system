@@ -7,14 +7,13 @@ import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Loader2, Ticket, Eye, Download, Mail, ArrowLeft, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Loader2, Ticket, Eye, Download, ArrowLeft, RefreshCw, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { getStudentFeeDetails, type Transaction, type FeeRecord } from '@/actions/fee-actions';
 import { InvoiceDisplay, type InvoiceData } from '@/components/student/invoice-display';
 import { formatDate } from '@/lib/utils';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
-import { sendInvoiceEmail } from '@/ai/flows/email-flow';
 import { useAuthProtection } from '@/hooks/useAuthProtection';
 import { useRouter } from 'next/navigation';
 
@@ -27,7 +26,6 @@ export default function StudentInvoicesPage() {
     const [isLoading, setIsLoading] = React.useState(true);
     const [isInvoiceOpen, setIsInvoiceOpen] = React.useState(false);
     const [selectedInvoice, setSelectedInvoice] = React.useState<InvoiceData | null>(null);
-    const [isSendingEmail, setIsSendingEmail] = React.useState(false);
     const invoiceRef = React.useRef<HTMLDivElement>(null);
     const [error, setError] = React.useState<string | null>(null);
 
@@ -68,8 +66,8 @@ export default function StudentInvoicesPage() {
         setSelectedInvoice({
             studentName: studentData.studentName || 'Student',
             studentEmail: currentUser?.email || 'N/A',
-            invoiceNumber: tx.id,
-            transactionId: tx.id,
+            invoiceNumber: tx.receiptNo || tx.id,
+            transactionId: tx.transactionId || tx.id,
             transactionDate: formatDate(new Date(tx.date).toISOString()),
             issueDate: formatDate(new Date(tx.date).toISOString()),
             dueDate: formatDate(new Date(tx.date).toISOString()),
@@ -103,18 +101,6 @@ export default function StudentInvoicesPage() {
         } catch (e) {
             toast({ variant: "destructive", title: "Download Failed", description: "Could not generate PDF." });
         }
-    };
-
-    const handleEmail = async () => {
-        if (!selectedInvoice) return;
-        setIsSendingEmail(true);
-        try {
-            await sendInvoiceEmail(selectedInvoice);
-            toast({ title: 'Email Sent', description: `Invoice sent to ${selectedInvoice.studentEmail}` });
-        } catch (e: any) {
-            toast({ variant: "destructive", title: "Email Failed", description: e.message });
-        }
-        setIsSendingEmail(false);
     };
 
     if (isLoading || authIsLoading) {
@@ -157,7 +143,7 @@ export default function StudentInvoicesPage() {
                 </CardHeader>
                 <CardContent>
                     <Table>
-                        <TableHeader><TableRow className="border-border/30"><TableHead>Date</TableHead><TableHead>Transaction ID</TableHead><TableHead>Amount</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
+                        <TableHeader><TableRow className="border-border/30"><TableHead>Date</TableHead><TableHead>Receipt No.</TableHead><TableHead>Amount</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
                         <TableBody>
                             {filteredTransactions.length > 0 ? filteredTransactions.map(tx => (
                                 <TableRow key={tx.id} className="hover:bg-blue-50/50 dark:hover:bg-blue-950/20 border-border/20">
@@ -177,7 +163,6 @@ export default function StudentInvoicesPage() {
                     <DialogHeader className="p-4 sm:p-6 border-b print:hidden"><DialogTitle>Invoice Details</DialogTitle></DialogHeader>
                     <div className="flex-grow overflow-y-auto bg-white p-4 sm:p-6 print:p-0"><InvoiceDisplay ref={invoiceRef} invoiceData={selectedInvoice} /></div>
                     <DialogFooter className="p-4 sm:p-6 border-t print:hidden flex-shrink-0">
-                        <Button variant="outline" onClick={handleEmail} disabled={isSendingEmail} className="gap-2">{isSendingEmail ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}Email</Button>
                         <Button onClick={handleDownload} className="gap-2"><Download className="h-4 w-4" />Download PDF</Button>
                         <DialogClose asChild><Button variant="secondary">Close</Button></DialogClose>
                     </DialogFooter>

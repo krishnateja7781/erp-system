@@ -1,6 +1,7 @@
 
 
 'use client';
+import { PERIOD_SLOTS } from '@/lib/utils';
 
 import * as React from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -48,11 +49,38 @@ export default function StudentDashboardPage() {
         loadData();
     }, [loadData]);
 
+    /** Exports the weekly timetable as an iCalendar file with weekly recurring events. */
     const handleDownload = () => {
-        toast({
-            title: "Feature Not Implemented",
-            description: "PDF/iCal download is not yet available.",
+        const schedule = dashboardData?.schedule || [];
+        if (schedule.length === 0) {
+            toast({ title: "Nothing to export", description: "Your timetable is empty." });
+            return;
+        }
+        const dayCodes: Record<string, string> = { Monday: 'MO', Tuesday: 'TU', Wednesday: 'WE', Thursday: 'TH', Friday: 'FR', Saturday: 'SA', Sunday: 'SU' };
+        const dayIndex: Record<string, number> = { Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6 };
+        const pad = (n: number) => String(n).padStart(2, '0');
+        const stamp = (d: Date) => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(d.getMinutes())}00`;
+        const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//EduERP//Timetable//EN', 'CALSCALE:GREGORIAN'];
+        schedule.forEach((s: any, i: number) => {
+            const slot = PERIOD_SLOTS[s.period];
+            if (!slot || dayIndex[s.day] === undefined) return;
+            const start = new Date();
+            start.setDate(start.getDate() + ((dayIndex[s.day] - start.getDay() + 7) % 7));
+            start.setHours(slot.start[0], slot.start[1], 0, 0);
+            const end = new Date(start);
+            end.setHours(slot.end[0], slot.end[1], 0, 0);
+            lines.push('BEGIN:VEVENT', `UID:erp-${s.id || i}@eduerp`, `DTSTAMP:${stamp(new Date())}`, `DTSTART:${stamp(start)}`, `DTEND:${stamp(end)}`,
+                `RRULE:FREQ=WEEKLY;BYDAY=${dayCodes[s.day]}`, `SUMMARY:${(s.courseName || s.courseCode || 'Class').replace(/[,;]/g, ' ')}`,
+                `DESCRIPTION:${(s.teacherName || '').replace(/[,;]/g, ' ')}`, 'END:VEVENT');
         });
+        lines.push('END:VCALENDAR');
+        const blob = new Blob([lines.join('\r\n')], { type: 'text/calendar' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'timetable.ics';
+        a.click();
+        URL.revokeObjectURL(url);
     };
 
 
@@ -168,7 +196,7 @@ export default function StudentDashboardPage() {
                 title="My Weekly Timetable"
                 description="An overview of your scheduled classes for the week."
                 headerAction={
-                    <Button variant="outline" onClick={handleDownload} disabled>
+                    <Button variant="outline" onClick={handleDownload}>
                         <Download className="mr-2 h-4 w-4" /> Download (WIP)
                     </Button>
                 }

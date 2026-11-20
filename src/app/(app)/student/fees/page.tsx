@@ -148,7 +148,7 @@ export default function StudentFeesPage() {
                         <TableHeader>
                             <TableRow className="border-border/30">
                                 <TableHead>Date</TableHead>
-                                <TableHead>Transaction ID</TableHead>
+                                <TableHead>Receipt No.</TableHead>
                                 <TableHead>Amount</TableHead>
                                 <TableHead>Status</TableHead>
                             </TableRow>

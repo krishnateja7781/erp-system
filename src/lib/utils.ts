@@ -52,97 +52,6 @@ export function generatePassword(firstName: string, dob: string): string | null 
   return `${namePart}${day}${month}`;
 };
 
-export const getProgramCode = (program: string | undefined): string => {
-  if (!program) return "XXX";
-  const programCodes: Record<string, string> = {
-    "B.Tech": "BTE",
-    "MBA": "MBA",
-    "Law": "LAW",
-    "MBBS": "MBB",
-    "B.Sc": "BSC",
-    "B.Com": "BCO"
-  };
-  return programCodes[program] || program.replace(/[^A-Z]/gi, '').substring(0, 3).toUpperCase().padEnd(3, 'X');
-};
-
-export const getTeacherProgramCode = (program: string | undefined): string => {
-  if (!program) return "XXXX";
-  const programCodes: Record<string, string> = {
-    "B.Tech": "BTEC",
-    "MBA": "MBAD",
-    "Law": "LAWS",
-    "MBBS": "MBBS",
-    "B.Sc": "BSCI",
-    "B.Com": "BCOM"
-  };
-  return programCodes[program] || program.replace(/[^A-Z]/gi, '').substring(0, 4).toUpperCase().padEnd(4, 'X');
-};
-
-export const getBranchCode = (branch: string | undefined, program: string | undefined): string => {
-  if (!branch || !program) return "XX";
-  const branchCodes: Record<string, Record<string, string>> = {
-    "B.Tech": { "CSE": "CSE", "ECE": "ECE", "MECH": "MEC", "IT": "IT", "AI&ML": "AML", "DS": "DS", "CIVIL": "CIV", "Other": "OTH" },
-    "MBA": { "Marketing": "MKT", "Finance": "FIN", "HR": "HR", "Operations": "OPS", "General": "GEN", "Other": "OTH" },
-    "Law": { "Corporate Law": "CRP", "Criminal Law": "CRM", "Civil Law": "CVL", "General": "GEN", "Other": "OTH" },
-    "MBBS": { "General Medicine": "GMD" },
-    "B.Sc": { "Physics": "PHY", "Chemistry": "CHM", "Mathematics": "MTH", "Computer Science": "CSE", "Biotechnology": "BIO", "Other": "OTH" },
-    "B.Com": { "General": "GEN", "Accounting & Finance": "ACF", "Taxation": "TAX", "Corporate Secretaryship": "CRS", "Other": "OTH" },
-  };
-  const programBranches = branchCodes[program];
-  if (programBranches && programBranches[branch]) {
-    return programBranches[branch];
-  }
-  return branch.replace(/[^A-Z0-9]/gi, '').substring(0, 3).toUpperCase().padEnd(2, 'X');
-};
-
-export const getDepartmentCode = (department: string | undefined, program?: string | undefined): string => {
-  if (!department) return "XX";
-
-  const deptMap: Record<string, string> = {
-    "Computer Science & Engineering": "CS",
-    "Electronics & Communication Engineering": "EC",
-    "Mechanical Engineering": "ME",
-    "Information Technology": "IT",
-    "Artificial Intelligence & Machine Learning": "AI",
-    "Data Science": "DS",
-    "Civil Engineering": "CE",
-    "General Administration": "AD",
-    "Accounts": "AC",
-    "Administration": "AD",
-    "Library": "LB",
-    "IT Support": "IT",
-    "Physics": "PH",
-    "Chemistry": "CH",
-    "Mathematics": "MA"
-  };
-
-  if (deptMap[department]) {
-    return deptMap[department];
-  }
-
-  // Fallback logic
-  if (department.toUpperCase().includes("CSE") || department.toUpperCase().includes("COMPUTER SCIENCE")) return "CS";
-  if (department.toUpperCase().includes("ECE") || department.toUpperCase().includes("ELECTRONICS")) return "EC";
-  if (department.toUpperCase().includes("MECH") || department.toUpperCase().includes("MECHANICAL")) return "ME";
-  if (department.toUpperCase().includes("IT") || department.toUpperCase().includes("INFORMATION TECHNOLOGY")) return "IT";
-  if (department.toUpperCase().includes("ADMINISTRATION")) return "AD";
-  if (department.toUpperCase().includes("ACCOUNTS")) return "AC";
-  if (department.toUpperCase().includes("LAW")) return "LW";
-  if (department.toUpperCase().includes("MEDICINE") || department.toUpperCase().includes("MBBS")) return "MD";
-  if (department.toUpperCase().includes("MBA")) return "BA";
-  return department.substring(0, Math.min(department.length, 2)).toUpperCase();
-};
-
-
-export function generateUSN(program: string, year: string, branch: string, sequenceNumber: number): string {
-  // USN FORMAT: [ProgCode(3)][Year(2)][BranchCode][Seq(4)]
-  const progCode = getProgramCode(program);
-  const yearCode = year.length === 4 ? year.substring(2) : (year.length === 2 ? year : '00');
-  const branchCode = getBranchCode(branch, program);
-  const seqStr = sequenceNumber.toString().padStart(4, '0');
-  return `${progCode}${yearCode}${branchCode}${seqStr}`.toUpperCase();
-}
-
 // Period Schedule definitions (assuming standard generic hours)
 export const PERIOD_SLOTS: Record<number, { title: string, start: [number, number], end: [number, number] }> = {
   1: { title: "09:00 AM - 10:00 AM", start: [9, 0], end: [10, 0] },
@@ -187,3 +96,33 @@ export function isPeriodActive(targetDateStr: string, periodNumber: number): boo
   // Allow a 5-minute buffer before the class starts (e.g. 8:55 AM for a 9:00 AM class)
   return currentTotalMinutes >= (startTotalMinutes - 5);
 }
+
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/** Period number → "HH:MM:SS" start/end strings stored in timetables. */
+export function periodToTimes(period: number): { start: string; end: string } {
+  const slot = PERIOD_SLOTS[period];
+  const [sh, sm] = slot ? slot.start : [8 + period, 0];
+  const [eh, em] = slot ? slot.end : [9 + period, 0];
+  return { start: `${pad2(sh)}:${pad2(sm)}:00`, end: `${pad2(eh)}:${pad2(em)}:00` };
+}
+
+/** "HH:MM[:SS]" start time stored in timetables → period number (inverse of periodToTimes). */
+export function periodFromStartTime(startTime: string | null | undefined): number {
+  if (!startTime) return 1;
+  const [h, m] = startTime.split(':').map((x) => parseInt(x, 10));
+  for (const [p, slot] of Object.entries(PERIOD_SLOTS)) {
+    if (slot.start[0] === h && slot.start[1] === (m || 0)) return Number(p);
+  }
+  return Math.max(1, (h || 9) - 8);
+}
+
+const WEEK_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/** Local weekday name, offset in days from today (0 = today, 1 = tomorrow). */
+export function todayDayName(offsetDays = 0): string {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  return WEEK_DAYS[d.getDay()];
+}
+

@@ -12,12 +12,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, UserPlus } from 'lucide-react';
 import { createStaffAccount, updateStaff } from '@/actions/staff-actions';
-import { generatePassword, getTeacherProgramCode } from '@/lib/utils';
+import { generatePassword } from '@/lib/utils';
+import { previewStaffId } from '@/lib/academic-codes';
 import type { StaffMember, EmployeeType } from '@/lib/types';
 
-const programs = ["B.Tech", "MBA", "Law", "MBBS", "B.Sc", "B.Com", "General Admin", "Other"];
+const programs = ["B.Tech", "MBA", "MCA", "Law", "MBBS", "B.Sc", "B.Com", "General Admin", "Other"];
 const departments: Record<string, string[]> = {
-  "B.Tech": ["CSE", "ECE", "MECH", "IT", "AI&ML", "DS", "CIVIL", "Mathematics", "Physics", "Chemistry", "English", "Other"],
+  "B.Tech": ["CSE", "ECE", "MECH", "IT", "AI&ML", "DS", "Cyber Security", "CIVIL", "Mathematics", "Physics", "Chemistry", "English", "Other"],
+  "MCA": ["Computer Applications", "Mathematics", "Other"],
   "MBA": ["Marketing", "Finance", "HR", "Operations", "General Management", "Other"],
   "Law": ["Corporate Law", "Criminal Law", "Civil Law", "Constitutional Law", "Other"],
   "MBBS": ["Anatomy", "Physiology", "Biochemistry", "General Medicine", "Surgery", "Pediatrics", "Other"],
@@ -118,6 +120,8 @@ export function AddStaffDialog({ isOpen, onOpenChange, onStaffAdded, initialData
   const watchedDob = watch("dob");
   const watchedDoj = watch("dateOfJoining");
   const watchedProgramAssociation = watch("programAssociation");
+  const watchedDepartment = watch("department");
+  const watchedEmployeeType = watch("employeeType");
 
   React.useEffect(() => {
     const selectedProgram = watchedProgramAssociation;
@@ -182,16 +186,12 @@ export function AddStaffDialog({ isOpen, onOpenChange, onStaffAdded, initialData
       } catch (e) { /* ignore invalid date */ }
     }
 
-    if ((mode === 'super_admin' || mode === 'employee') && watchedDoj) {
-      const prefix = mode === 'super_admin' ? 'ADM' : 'EMP';
-      setValue("displayStaffId", `${prefix}${dojYearCode}0001 (Example)`);
-    } else if (mode === 'teacher' && watchedDoj && watchedProgramAssociation) {
-      const progCode = getTeacherProgramCode(watchedProgramAssociation);
-      setValue("displayStaffId", `TEA${dojYearCode}${progCode}0001 (Example)`);
+    if (watchedDoj && (mode !== 'teacher' || watchedDepartment)) {
+      setValue("displayStaffId", `${previewStaffId(mode, watchedDepartment, watchedEmployeeType, watchedDoj)} (next serial assigned on save)`);
     } else {
       setValue("displayStaffId", "Auto-generated");
     }
-  }, [mode, watchedDoj, watchedProgramAssociation, setValue, isEditMode]);
+  }, [mode, watchedDoj, watchedDepartment, watchedEmployeeType, setValue, isEditMode]);
 
   async function onSubmit(values: z.infer<typeof addStaffFormSchema>) {
     setIsLoading(true);

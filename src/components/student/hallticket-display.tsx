@@ -31,6 +31,7 @@ export const HallTicketDisplay = React.forwardRef<HTMLDivElement, HallTicketDisp
         {/* Student Information Section */}
         <div className="grid grid-cols-3 gap-6 mb-8 items-start print:grid-cols-3 print:gap-4">
           <div className="col-span-2 space-y-2.5 print:col-span-2">
+            {hallTicketData.hallTicketNumber && <InfoRow label="Hall Ticket No." value={hallTicketData.hallTicketNumber} />}
             <InfoRow label="Student Name" value={hallTicketData.studentName} />
             <InfoRow label="College ID" value={hallTicketData.studentCollegeId} />
             <InfoRow label="Program" value={hallTicketData.program} />

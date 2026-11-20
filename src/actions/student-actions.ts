@@ -1,126 +1,99 @@
-'use server'
+'use server';
 
-import { createServiceRoleClient } from '@/lib/supabase'
-// All DB reads / writes use service role to bypass RLS (these are server-only actions)
-const createServerSupabaseClient = createServiceRoleClient
-import { getSession } from './auth-actions';
-import { generatePassword } from '@/lib/utils';
+import { createServiceRoleClient } from '@/lib/supabase';
+import { authorize, requireRole, requireStudentAccess, STUDENT_READERS } from '@/lib/auth-guard';
+import { createStudentRecord, type StudentRecordInput } from '@/lib/accounts';
+import { fetchAllRows, resolveCourseId } from '@/lib/db';
+import { periodFromStartTime } from '@/lib/utils';
+import { getStudentProfileDetails } from './dashboard-actions';
+import type { ActionResult } from '@/lib/types';
 
-export async function createStudentAccount(data: any) {
-  const adminSupabase = await createServiceRoleClient()
-  
-  const progCode = (data.program || 'UNK').toString().substring(0, 3).toUpperCase();
-  const yearCode = (data.batch || new Date().getFullYear().toString()).toString().substring(2, 4);
-  const branchCode = (data.branch || 'UNK').toString().substring(0, 3).toUpperCase();
-  const idPrefix = `${progCode}${yearCode}${branchCode}`;
+const STUDENT_ADMINS = ['emp:student_staff_management'] as const;
+const DEFAULT_SECTIONS = ['A', 'B', 'C'];
 
-  const { count } = await adminSupabase.from('students')
-    .select('*', { count: 'exact', head: true })
-    .like('college_id', `${idPrefix}%`);
-    
-  const nextSeq = ((count || 0) + 1).toString().padStart(4, '0');
-  const finalCollegeId = `${idPrefix}${nextSeq}`;
+// ── Account lifecycle (admin / student-staff employees) ──────────────────────
 
-  const email = data.email || `${finalCollegeId.toLowerCase()}@student.edu.in`;
-  const password = data.password || generatePassword(data.firstName || data.fullName, data.dob) || 'Student@123';
-  
-  const { data: authData, error: authError } = await adminSupabase.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-  })
-  
-  if (authError) return { success: false, error: authError.message }
-  
-  const userId = authData.user.id
-  const fullName = data.firstName && data.lastName ? `${data.firstName} ${data.lastName}`.trim() : (data.name || data.fullName || 'Student')
-  const isHosteler = data.type === 'Hosteler' || data.isHosteler === true;
-  
-  const { error: profileError } = await adminSupabase.from('profiles').insert({
-    id: userId,
-    role: 'student',
-    full_name: fullName,
-    first_name: data.firstName || null,
-    last_name: data.lastName || null,
-    email: email,
-    phone: data.phone || null,
-    dob: data.dob || null,
-    id_code: finalCollegeId,
-    initial_password: password
-  })
-  
-  if (profileError) {
-    await adminSupabase.auth.admin.deleteUser(userId)
-    return { success: false, error: profileError.message }
+export async function createStudentAccount(data: StudentRecordInput): Promise<ActionResult> {
+  const auth = await authorize(...STUDENT_ADMINS);
+  if (!auth.ok) return { success: false, error: auth.error };
+  return createStudentRecord(data);
+}
+
+export async function updateStudent(id: string, data: any) {
+  const auth = await authorize(...STUDENT_ADMINS);
+  if (!auth.ok) return { success: false, error: auth.error };
+  const admin = await createServiceRoleClient();
+
+  const { data: student } = await admin.from('students').select('id, profile_id').eq('id', id).maybeSingle();
+  if (!student) return { success: false, error: 'Student not found.' };
+
+  const studentPatch: Record<string, unknown> = {};
+  if (data.program) studentPatch.program = data.program;
+  if (data.branch) studentPatch.branch = data.branch;
+  if (data.section) studentPatch.section = String(data.section).toUpperCase();
+  if (data.year) studentPatch.current_year = parseInt(data.year, 10);
+  if (data.semester) studentPatch.current_semester = parseInt(data.semester, 10);
+  // College IDs are permanent once issued (they appear on hall tickets, receipts and records).
+  if (data.type) studentPatch.is_hosteler = data.type === 'Hosteler';
+  if (data.status) {
+    const allowed = ['Active', 'Inactive', 'Graduated', 'Pending Approval', 'Suspended', 'Dropped Out'];
+    if (!allowed.includes(data.status)) return { success: false, error: 'Invalid status.' };
+    studentPatch.status = data.status;
   }
-  
-  const { error: studentError } = await adminSupabase.from('students').insert({
-    profile_id: userId,
-    college_id: finalCollegeId,
-    program: data.program,
-    branch: data.branch,
-    current_semester: parseInt(data.semester) || data.current_semester || 1,
-    current_year: parseInt(data.year) || data.current_year || 1,
-    is_hosteler: isHosteler,
-    dob: data.dob || null,
-    admitted_year: parseInt(data.batch) || new Date().getFullYear(),
-    gender: data.gender || null,
-    address: data.address || null,
-    parent_name: data.emergencyContactName || null,
-    parent_phone: data.emergencyContactPhone || null,
-    blood_group: data.bloodGroup || null
-  })
-  
-  if (studentError) {
-    await adminSupabase.auth.admin.deleteUser(userId)
-    return { success: false, error: studentError.message }
+  if (data.gender !== undefined) studentPatch.gender = data.gender || null;
+  if (data.bloodGroup !== undefined) studentPatch.blood_group = data.bloodGroup || null;
+  if (data.address !== undefined) studentPatch.address = data.address || null;
+  if (data.emergencyContactName !== undefined) studentPatch.parent_name = data.emergencyContactName || null;
+  if (data.emergencyContactPhone !== undefined) studentPatch.parent_phone = data.emergencyContactPhone || null;
+  if (data.dob !== undefined) studentPatch.dob = data.dob || null;
+
+  if (Object.keys(studentPatch).length > 0) {
+    const { error } = await admin.from('students').update(studentPatch).eq('id', id);
+    if (error) return { success: false, error: error.message };
   }
-  
-  return { success: true, message: `Student successfully created! Email: ${email}`, studentId: finalCollegeId, password, email }
+
+  const fullName = data.firstName ? `${data.firstName} ${data.lastName || ''}`.trim() : data.name || data.fullName;
+  const profilePatch: Record<string, unknown> = {};
+  if (fullName) profilePatch.full_name = fullName;
+  if (data.firstName !== undefined) profilePatch.first_name = data.firstName || null;
+  if (data.lastName !== undefined) profilePatch.last_name = data.lastName || null;
+  if (data.phone !== undefined) profilePatch.phone = data.phone || null;
+  if (data.dob !== undefined) profilePatch.dob = data.dob || null;
+  if (Object.keys(profilePatch).length > 0) {
+    const { error } = await admin.from('profiles').update(profilePatch).eq('id', student.profile_id);
+    if (error) return { success: false, error: error.message };
+  }
+
+  return { success: true, message: 'Student updated successfully.' };
 }
 
-export async function getStudentsForSection(program: string, branch: string, section: string) {
-    const supabase = await createServerSupabaseClient();
-    const { data, error } = await supabase
-        .from('students')
-        .select('id, college_id, is_graduated, profiles(full_name)')
-        .eq('program', program)
-        .eq('branch', branch)
-        .eq('section', section)
-        .order('college_id');
-        
-    if (error || !data) return [];
-    
-    return data.map((s: any) => ({
-        id: s.id,
-        collegeId: s.college_id,
-        name: s.profiles?.full_name || 'Unknown',
-        status: s.is_graduated ? 'Graduated' : 'Active'
-    }));
+export async function deleteStudent(id: string) {
+  const auth = await authorize(...STUDENT_ADMINS);
+  if (!auth.ok) return { success: false, error: auth.error };
+  const admin = await createServiceRoleClient();
+
+  const { data: student } = await admin.from('students').select('profile_id').eq('id', id).maybeSingle();
+  if (!student) return { success: false, error: 'Student not found.' };
+
+  // Deleting the auth user cascades: auth.users → profiles → students → all dependent rows.
+  const { error } = await admin.auth.admin.deleteUser(student.profile_id);
+  if (error) return { success: false, error: error.message };
+  return { success: true, message: 'Student and related access revoked successfully.' };
 }
 
-export async function getStudent(id: string) {
-  const supabase = await createServerSupabaseClient()
-  const { data, error } = await supabase
-    .from('students')
-    .select('*, profiles(*)')
-    .eq('id', id)
-    .single()
-    
-  if (error) return { data: null, error: error.message }
-  return { data, error: null }
+/** Allocates the next college ID for a program/branch/admission year (consumes the number). */
+export async function generateCollegeId(program: string, year: number, branch?: string) {
+  await requireRole(...STUDENT_ADMINS);
+  const admin = await createServiceRoleClient();
+  const { data, error } = await admin.rpc('generate_college_id', { p_program: program, p_branch: branch || null, p_admitted_year: year });
+  if (error) return { data: null, error: error.message };
+  return { data: data as string, error: null };
 }
 
-export async function getStudents() {
-  const supabase = await createServerSupabaseClient()
-  const { data: students, error } = await supabase
-    .from('students')
-    .select(`*, profiles(full_name, email)`)
-    .order('created_at', { ascending: false })
+// ── Directory reads (staff) ──────────────────────────────────────────────────
 
-  if (error || !students) return []
-
-  return students.map((s: any) => ({
+function mapStudentRow(s: any) {
+  return {
     id: s.id,
     collegeId: s.college_id,
     name: s.profiles?.full_name || 'Unknown',
@@ -133,344 +106,252 @@ export async function getStudents() {
     bloodGroup: s.blood_group,
     isHosteler: s.is_hosteler,
     type: s.is_hosteler ? 'Hosteler' : 'Day Scholar',
-    // BUG FIX #26: was hardcoded to 'A' — section is student-specific
     section: s.section || null,
-    status: s.is_graduated ? 'Graduated' : 'Active',
-  }))
+    status: s.status || (s.is_graduated ? 'Graduated' : 'Active'),
+  };
+}
+
+export async function getStudents() {
+  await requireRole(...STUDENT_READERS);
+  const admin = await createServiceRoleClient();
+  const rows = await fetchAllRows(() =>
+    admin
+      .from('students')
+      .select('id, college_id, program, branch, section, current_year, current_semester, gender, blood_group, is_hosteler, is_graduated, status, profiles(full_name, email)')
+      .order('college_id', { ascending: true }),
+  );
+  return rows.map(mapStudentRow);
 }
 
 export async function getAllStudents() {
-  return getStudents()
+  return getStudents();
 }
 
-export async function updateStudent(id: string, data: any) {
-  const adminSupabase = await createServiceRoleClient()
-  
-  const updatePayload: any = {}
-  if (data.program) updatePayload.program = data.program
-  if (data.branch) updatePayload.branch = data.branch
-  if (data.year) updatePayload.current_year = parseInt(data.year)
-  if (data.semester) updatePayload.current_semester = parseInt(data.semester)
-  if (data.collegeId) updatePayload.college_id = data.collegeId
-  if (data.type) {
-    updatePayload.is_hosteler = data.type === 'Hosteler';
+export async function getStudent(id: string) {
+  try {
+    const { studentId } = await requireStudentAccess(id);
+    const admin = await createServiceRoleClient();
+    const { data, error } = await admin.from('students').select('*, profiles(*)').eq('id', studentId).single();
+    if (error) return { data: null, error: error.message };
+    return { data, error: null };
+  } catch (e: any) {
+    return { data: null, error: e.message };
   }
-
-  if (Object.keys(updatePayload).length > 0) {
-    const { error } = await adminSupabase.from('students').update(updatePayload).eq('id', id)
-    if (error) return { success: false, error: error.message }
-  }
-
-  const fullName = data.firstName && data.lastName ? `${data.firstName} ${data.lastName}`.trim() : (data.name || data.fullName)
-
-  if (fullName || data.firstName || data.lastName) {
-    const { data: studentRecord } = await adminSupabase.from('students').select('profile_id').eq('id', id).single()
-    if (studentRecord?.profile_id) {
-      await adminSupabase.from('profiles').update({ 
-        full_name: fullName,
-        first_name: data.firstName || null,
-        last_name: data.lastName || null,
-        phone: data.phone || null,
-        dob: data.dob || null
-      }).eq('id', studentRecord.profile_id)
-    }
-  }
-
-  return { success: true, message: 'Student updated successfully.' }
 }
 
-export async function deleteStudent(id: string) {
-  const adminSupabase = await createServiceRoleClient()
-  
-  const { data: studentRecord } = await adminSupabase.from('students').select('profile_id').eq('id', id).single()
-  
-  const { error } = await adminSupabase.from('students').delete().eq('id', id)
-  if (error) return { success: false, error: error.message }
-  
-  if (studentRecord?.profile_id) {
-    await adminSupabase.auth.admin.deleteUser(studentRecord.profile_id)
+export async function getStudentsForSection(program: string, branch: string, section: string) {
+  await requireRole(...STUDENT_READERS);
+  const admin = await createServiceRoleClient();
+  const rows = await fetchAllRows(() =>
+    admin
+      .from('students')
+      .select('id, college_id, is_graduated, status, profiles(full_name)')
+      .eq('program', program)
+      .eq('branch', branch)
+      .eq('section', section)
+      .order('college_id'),
+  );
+  return rows.map((s: any) => ({
+    id: s.id,
+    collegeId: s.college_id,
+    name: s.profiles?.full_name || 'Unknown',
+    status: s.status || (s.is_graduated ? 'Graduated' : 'Active'),
+  }));
+}
+
+export async function getStudentProfileForTeacher(studentId: string, _teacherId?: string): Promise<{ data: any; error: string | null }> {
+  try {
+    const { studentId: resolved } = await requireStudentAccess(studentId);
+    const details = await getStudentProfileDetails(resolved);
+    if (!details) return { data: null, error: 'Student not found.' };
+    return { data: details, error: null };
+  } catch (e: any) {
+    return { data: null, error: e.message };
   }
-  
-  return { success: true, message: 'Student and related access revoked successfully.' }
 }
 
-export async function generateCollegeId(program: string, year: number) {
-  const prefix = program.substring(0, 3).toUpperCase()
-  const yearCode = year.toString().slice(-2)
-  const randomSuffix = Math.floor(1000 + Math.random() * 9000)
-  return { data: `${prefix}${yearCode}${randomSuffix}`, error: null }
-}
-
-// ── Session-based identity for Student Portal pages ───────────────────────────
+// ── Student self-service ─────────────────────────────────────────────────────
 
 export async function getMyStudentProfile() {
-  const result = await getSession();
-  if (!result || result.error || !result.data?.session) return null;
+  const caller = await requireRole('student').catch(() => null);
+  if (!caller || caller.role !== 'student') return null;
 
-  const userId = result.data.session.user.id;
-  const supabase = await createServerSupabaseClient();
-
-  const { data: student, error } = await supabase
+  const admin = await createServiceRoleClient();
+  const { data: student } = await admin
     .from('students')
     .select('*, profiles(full_name, email, phone, profile_picture_url)')
-    .eq('profile_id', userId)
-    .single();
+    .eq('profile_id', caller.userId)
+    .maybeSingle();
+  if (!student) return null;
 
-  if (error || !student) return null;
-
+  const p = (student as any).profiles || {};
   return {
     studentId: student.id,
-    profileId: userId,
+    profileId: caller.userId,
     collegeId: student.college_id,
-    name: (student as any).profiles?.full_name || 'Student',
-    email: (student as any).profiles?.email || '',
-    phone: (student as any).profiles?.phone || '',
-    avatarUrl: (student as any).profiles?.profile_picture_url || '',
+    name: p.full_name || 'Student',
+    email: p.email || '',
+    phone: p.phone || '',
+    avatarUrl: p.profile_picture_url || '',
     program: student.program,
     branch: student.branch,
+    section: student.section,
     semester: student.current_semester,
     year: student.current_year,
     isHosteler: student.is_hosteler,
     type: student.is_hosteler ? 'Hosteler' : 'Day Scholar',
     isGraduated: student.is_graduated,
+    status: student.status,
   };
 }
 
-// ── Fetch student backlogs ─────────────────────────────────────────────────────
-
+/** Backlogs (from the backlogs table, kept in sync with marks by the database). */
 export async function fetchStudentBacklogs(studentId: string) {
-  const supabase = await createServerSupabaseClient();
-
-  const { data: marksData } = await supabase
-    .from('marks')
-    .select('grade, classes(semester, courses(code, name))')
-    .eq('student_id', studentId);
-
-  if (!marksData) return [];
-
-  const backlogs: any[] = [];
-  for (const m of marksData as any[]) {
-    if (m.grade === 'FAIL' || m.grade === 'F') {
-      backlogs.push({
-        courseCode: m.classes?.courses?.code || null,
-        courseName: m.classes?.courses?.name || null,
-        semesterAttempted: m.classes?.semester || null,
-        gradeAchieved: m.grade,
-        status: 'Active',
-      });
-    } else if (m.grade && m.grade !== 'N/A') {
-      const hasFail = marksData.some((other: any) =>
-        other.classes?.courses?.code === m.classes?.courses?.code &&
-        (other.grade === 'FAIL' || other.grade === 'F')
-      );
-      if (hasFail) {
-        backlogs.push({
-          courseCode: m.classes?.courses?.code || null,
-          courseName: m.classes?.courses?.name || null,
-          semesterAttempted: m.classes?.semester || null,
-          gradeAchieved: m.grade,
-          status: 'Cleared',
-        });
-      }
-    }
-  }
-
-  return backlogs;
+  const { studentId: sid } = await requireStudentAccess(studentId, ['emp:exam_marks_management']);
+  const admin = await createServiceRoleClient();
+  const { data } = await admin
+    .from('backlogs')
+    .select('semester, fail_count, status, cleared_grade, courses(code, name)')
+    .eq('student_id', sid)
+    .order('semester');
+  return ((data || []) as any[]).map((b) => ({
+    courseCode: b.courses?.code || null,
+    courseName: b.courses?.name || null,
+    semesterAttempted: b.semester,
+    gradeAchieved: b.status === 'Cleared' ? b.cleared_grade : 'F',
+    failCount: b.fail_count,
+    status: b.status as 'Active' | 'Cleared',
+  }));
 }
 
-// ── Student Attendance API ─────────────────────────────────────────────────────
-
 export async function getStudentAttendanceDetails(studentId: string) {
-  const supabase = await createServerSupabaseClient();
+  const { studentId: sid } = await requireStudentAccess(studentId);
+  const admin = await createServiceRoleClient();
 
-  const { data: attendanceData } = await supabase
-    .from('attendance')
-    .select('id, date, period, status, classes(semester, courses(code, name))')
-    .eq('student_id', studentId);
+  const attendanceData = await fetchAllRows(() =>
+    admin
+      .from('attendance')
+      .select('id, date, period, status, classes(semester, courses(code, name))')
+      .eq('student_id', sid)
+      .order('date', { ascending: false }),
+  );
 
-  const logs = (attendanceData || []).map((a: any) => ({
-      id: a.id,
-      date: a.date,
-      period: a.period,
-      status: a.status,
-      semester: a.classes?.semester,
-      courseCode: a.classes?.courses?.code,
-      courseName: a.classes?.courses?.name
+  const logs = attendanceData.map((a: any) => ({
+    id: a.id,
+    date: a.date,
+    period: a.period,
+    status: a.status,
+    semester: a.classes?.semester,
+    courseCode: a.classes?.courses?.code,
+    courseName: a.classes?.courses?.name,
   }));
 
-  const semestersMap = new Map<number, Map<string, any>>();
-  
-  (attendanceData || []).forEach((a: any) => {
-      const sem = a.classes?.semester || 1;
-      const cCode = a.classes?.courses?.code || 'UNK';
-      const cName = a.classes?.courses?.name || 'Unknown';
+  const semestersMap = new Map<number, Map<string, { courseCode: string; courseName: string; attended: number; total: number }>>();
+  for (const a of attendanceData as any[]) {
+    const sem = a.classes?.semester || 1;
+    const code = a.classes?.courses?.code || 'UNK';
+    if (!semestersMap.has(sem)) semestersMap.set(sem, new Map());
+    const courseMap = semestersMap.get(sem)!;
+    if (!courseMap.has(code)) courseMap.set(code, { courseCode: code, courseName: a.classes?.courses?.name || 'Unknown', attended: 0, total: 0 });
+    const stats = courseMap.get(code)!;
+    stats.total += 1;
+    if (a.status === 'Present') stats.attended += 1;
+  }
 
-      if (!semestersMap.has(sem)) semestersMap.set(sem, new Map());
-      const courseMap = semestersMap.get(sem)!;
-
-      if (!courseMap.has(cCode)) {
-          courseMap.set(cCode, { courseCode: cCode, courseName: cName, attended: 0, total: 0 });
-      }
-      const stats = courseMap.get(cCode)!;
-      stats.total += 1;
-      if (a.status === 'Present') {
-          stats.attended += 1;
-      }
-  });
-
-  const summary = Array.from(semestersMap.entries()).map(([semester, coursesMap]) => ({
-      semester,
-      courses: Array.from(coursesMap.values())
-  }));
+  const summary = Array.from(semestersMap.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([semester, courses]) => ({ semester, courses: Array.from(courses.values()) }));
 
   return { logs, summary };
 }
 
-// ── Student Performance API ────────────────────────────────────────────────────
-
 export interface StudentPerformanceData {
-  marksData: {
-    courseCode: string;
-    internals: number;
-    externals: number;
-  }[];
-  attendanceData: {
-    month: string;
-    percentage: number;
-  }[];
+  marksData: { courseCode: string; internals: number; externals: number }[];
+  attendanceData: { month: string; percentage: number }[];
 }
 
 export async function getStudentPerformanceData(studentId: string): Promise<StudentPerformanceData> {
-  const supabase = await createServerSupabaseClient();
+  const { studentId: sid } = await requireStudentAccess(studentId);
+  const admin = await createServiceRoleClient();
 
-  const { data: marks } = await supabase
-    .from('marks')
-    .select('ia1, ia2, other, see, classes(courses(code))')
-    .eq('student_id', studentId)
-    .limit(10);
+  const [{ data: marks }, { data: monthly }] = await Promise.all([
+    admin.from('marks').select('ia1, ia2, other, see, classes(courses(code))').eq('student_id', sid).limit(20),
+    admin.rpc('get_student_monthly_attendance', { p_student_id: sid }),
+  ]);
 
+  // Scaled to the same /60 internal and /40 external split the grade uses.
   const marksData = (marks || []).map((m: any) => ({
     courseCode: m.classes?.courses?.code || 'UNK',
-    internals: (m.ia1 || 0) + (m.ia2 || 0) + (m.other || 0),
-    externals: m.see || 0,
+    internals: Math.round((Number(m.ia1 ?? 0) / 2 + Number(m.ia2 ?? 0) / 2 + Number(m.other ?? 0)) * 10) / 10,
+    externals: Math.round(Number(m.see ?? 0) * 0.4 * 10) / 10,
   }));
 
-  const { data: attendanceLogs } = await supabase
-    .from('attendance')
-    .select('date, status')
-    .eq('student_id', studentId);
-
-  const monthlyStats: Record<string, { total: number; present: number }> = {};
-  (attendanceLogs || []).forEach((log: any) => {
-    if (!log.date) return;
-    try {
-        const d = new Date(log.date);
-        // Ensure month is short text like "Jan"
-        const month = d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
-        if (!monthlyStats[month]) monthlyStats[month] = { total: 0, present: 0 };
-        monthlyStats[month].total++;
-        if (log.status === 'Present') monthlyStats[month].present++;
-    } catch (e) {
-        /* Ignore invalid dates */
-    }
-  });
-
-  const monthsOrder = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  
-  const attendanceData = Object.entries(monthlyStats)
-    .map(([month, stats]) => ({
-        month,
-        percentage: Math.round((stats.present / stats.total) * 100)
-    }))
-    .sort((a, b) => monthsOrder.indexOf(a.month) - monthsOrder.indexOf(b.month));
-
-  return {
-    marksData,
-    attendanceData: attendanceData.length > 0 ? attendanceData : [{ month: 'Current', percentage: 0 }]
-  };
+  const attendanceData = ((monthly as any[]) || []).map((r) => ({ month: r.month_label, percentage: Number(r.percentage) }));
+  return { marksData, attendanceData: attendanceData.length > 0 ? attendanceData : [{ month: 'Current', percentage: 0 }] };
 }
 
 export async function getStudentSchedule(studentId: string): Promise<any[]> {
-  const supabase = await createServerSupabaseClient();
-  const { data: student } = await supabase.from('students').select('*').eq('id', studentId).single();
+  const { studentId: sid } = await requireStudentAccess(studentId);
+  const admin = await createServiceRoleClient();
+  const { data: student } = await admin
+    .from('students')
+    .select('program, branch, section, current_semester')
+    .eq('id', sid)
+    .maybeSingle();
   if (!student) return [];
 
-  const { data: classList } = await supabase
-      .from('classes')
-      .select('id, courses(name, code), teachers(profiles(full_name))')
-      .eq('program', student.program)
-      .eq('branch', student.branch)
-      .eq('semester', student.current_semester)
-      .eq('section', student.section || 'A');
+  const { data: classList } = await admin
+    .from('classes')
+    .select('id, courses(name, code), teachers(profiles(full_name)), timetables(id, day_of_week, start_time, room)')
+    .eq('program', student.program)
+    .eq('branch', student.branch)
+    .eq('semester', student.current_semester)
+    .eq('section', student.section || 'A');
 
-  if (!classList || classList.length === 0) return [];
-  const classIds = classList.map(c => c.id);
-
-  const { data: timetables } = await supabase
-      .from('timetables')
-      .select('*')
-      .in('class_id', classIds);
-
-  if (!timetables || timetables.length === 0) return [];
-
-  return timetables.map((entry: any) => {
-      const cls: any = classList.find((c: any) => c.id === entry.class_id);
-      let periodVal = 1;
-      if (entry.start_time) {
-          periodVal = parseInt(entry.start_time.split(':')[0], 10);
-      }
-      return {
-          id: entry.id,
-          period: periodVal,
-          courseCode: cls?.courses?.code,
-          courseName: cls?.courses?.name,
-          className: `${student.program} ${student.branch} ${student.section || 'A'}`,
-          day: entry.day_of_week,
-          teacherName: cls?.teachers?.profiles?.full_name || 'Unassigned'
-      };
-  });
+  const out: any[] = [];
+  for (const cls of (classList || []) as any[]) {
+    for (const entry of cls.timetables || []) {
+      out.push({
+        id: entry.id,
+        period: periodFromStartTime(entry.start_time),
+        courseCode: cls.courses?.code,
+        courseName: cls.courses?.name,
+        className: `${student.program} ${student.branch} ${student.section || 'A'}`,
+        day: entry.day_of_week,
+        room: entry.room || null,
+        teacherName: cls.teachers?.profiles?.full_name || 'Unassigned',
+      });
+    }
+  }
+  return out;
 }
 
+// ── Section helpers ──────────────────────────────────────────────────────────
+
 export async function getAvailableSections(program: string, year: string | number, courseId: string): Promise<string[]> {
-  const supabase = await createServerSupabaseClient();
-  // BUG FIX #27: was ignoring program and courseId params — now properly filters by course
-  let queryCourseId = courseId;
-  if (courseId && !courseId.includes('-')) {
-      const { data: c } = await supabase.from('courses').select('id').eq('code', courseId).single();
-      if (c) queryCourseId = c.id;
+  await requireRole();
+  const admin = await createServiceRoleClient();
+  let query = admin.from('classes').select('section').eq('academic_year', String(year));
+  if (program) query = query.eq('program', program);
+  if (courseId) {
+    const resolved = await resolveCourseId(admin, courseId);
+    if (resolved) query = query.eq('course_id', resolved);
   }
-  const { data } = await supabase
-      .from('classes')
-      .select('section')
-      .eq('academic_year', year.toString())
-      .eq('course_id', queryCourseId);
-  if (!data || data.length === 0) return ['A', 'B', 'C'];
-  const sections = Array.from(new Set(data.filter(d => d.section).map(d => d.section)));
-  return sections.length > 0 ? sections : ['A', 'B', 'C'];
+  const { data } = await query.limit(1000);
+  const sections = Array.from(new Set((data || []).map((d: any) => d.section).filter(Boolean))).sort();
+  return sections.length > 0 ? (sections as string[]) : DEFAULT_SECTIONS;
 }
 
 export async function getSectionsForBranch(program: string, branch: string): Promise<string[]> {
-  const supabase = await createServerSupabaseClient();
-  // BUG FIX #28: was ignoring all parameters — now filters by program and branch
-  const { data } = await supabase
-      .from('classes')
-      .select('section')
-      .eq('program', program)
-      .eq('branch', branch);
-  if (!data || data.length === 0) return ['A', 'B', 'C'];
-  const sections = Array.from(new Set(data.filter(d => d.section).map(d => d.section)));
-  return sections.length > 0 ? sections : ['A', 'B', 'C'];
+  await requireRole();
+  const admin = await createServiceRoleClient();
+  const [{ data: cls }, { data: stu }] = await Promise.all([
+    admin.from('classes').select('section').eq('program', program).eq('branch', branch).limit(1000),
+    admin.rpc('get_distinct_sections', { p_program: program, p_branch: branch }),
+  ]);
+  const set = new Set<string>();
+  (cls || []).forEach((d: any) => d.section && set.add(d.section));
+  ((stu as any[]) || []).forEach((d: any) => d.section && set.add(d.section));
+  const sections = Array.from(set).sort();
+  return sections.length > 0 ? sections : DEFAULT_SECTIONS;
 }
-
-export async function getStudentProfileForTeacher(studentId: string, teacherId?: string): Promise<{ data: any, error: string | null }> {
-  const supabase = await createServerSupabaseClient();
-  const { data, error } = await supabase
-    .from('students')
-    .select('*, profiles(*)')
-    .eq('id', studentId)
-    .single();
-    
-  if (error) return { data: null, error: error.message };
-  return { data, error: null };
-}
-

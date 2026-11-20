@@ -1,4 +1,5 @@
 import { GoogleBooksSearch } from '@/components/library/google-books-search';
+import { LoansPanel } from '@/components/library/loans-panel';
 import { getSession } from '@/actions/auth-actions';
 import { redirect } from 'next/navigation';
 
@@ -22,6 +23,8 @@ export default async function LibraryManagePage() {
       <div className="bg-muted/10 p-6 rounded-xl border">
         <GoogleBooksSearch />
       </div>
+
+      <LoansPanel />
     </div>
   );
 }

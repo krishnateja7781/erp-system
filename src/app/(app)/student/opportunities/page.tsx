@@ -134,6 +134,7 @@ export default function OpportunitiesPage() {
             });
             if (result.success) {
                 toast({ title: 'Application Successful', description: result.message });
+                await fetchApplications(currentUser.uid); // button flips to "Applied" immediately
             } else {
                 toast({ variant: 'destructive', title: 'Application Failed', description: result.error });
             }
@@ -155,6 +156,11 @@ export default function OpportunitiesPage() {
 
         if (appliedStatus) {
             return <Button disabled variant="secondary" className="w-full gap-2"><Check className="h-4 w-4" /> {appliedStatus}</Button>;
+        }
+
+        const today = new Date().toISOString().slice(0, 10);
+        if (opportunity.status === 'Closed' || (opportunity.deadline && opportunity.deadline < today)) {
+            return <Button disabled variant="outline" className="w-full">{opportunity.status === 'Closed' ? 'Applications Closed' : 'Deadline Passed'}</Button>;
         }
 
         if (!isEligible) {

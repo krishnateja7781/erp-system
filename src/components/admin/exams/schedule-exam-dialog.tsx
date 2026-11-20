@@ -1,5 +1,6 @@
 
 'use client';
+import { PROGRAMS, BRANCHES } from '@/lib/academic-codes';
 
 import * as React from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
@@ -40,17 +41,10 @@ interface ScheduleExamDialogProps {
     initialData?: ExamSchedule | null;
 }
 
-const programs = ["B.Tech", "MBA", "Law", "MBBS", "B.Sc", "B.Com"];
+const programs = [...PROGRAMS];
 const years = ["1", "2", "3", "4", "5"];
 const semesters = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"];
-const hardcodedBranches: Record<string, string[]> = {
-    "B.Tech": ["CSE", "ECE", "MECH", "IT", "AI&ML", "DS", "CIVIL", "Other"],
-    "MBA": ["Marketing", "Finance", "HR", "Operations", "General", "Other"],
-    "Law": ["Corporate Law", "Criminal Law", "Civil Law", "General", "Other"],
-    "MBBS": ["General Medicine"],
-    "B.Sc": ["Physics", "Chemistry", "Mathematics", "Computer Science", "Other"],
-    "B.Com": ["General", "Accounting & Finance", "Taxation", "Other"],
-};
+const hardcodedBranches: Record<string, string[]> = { ...BRANCHES };
 const examSessionTypes = ["IA-1", "IA-2", "SEE (semester end examinations)"];
 
 export function ScheduleExamDialog({ isOpen, onOpenChange, onScheduleSaved, mode, initialData }: ScheduleExamDialogProps) {

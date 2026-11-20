@@ -37,7 +37,7 @@ async function fetchClassroomSummary(classroomId: string): Promise<ClassroomDeta
       name: room.name || '',
       subject: room.subject || '',
       ownerName: room.ownerName || 'N/A',
-      memberCount: room.memberUids?.length ?? 0,
+      memberCount: room.memberCount ?? room.memberUids?.length ?? 0,
       inviteCode: room.inviteCode || 'N/A',
       createdAt: room.createdAt || '',
     };
